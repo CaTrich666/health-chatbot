@@ -15,8 +15,8 @@ import streamlit as st
 import streamlit.components.v1 as components 
 import os
 import sys
-import zipfile  # <--- CẬP NHẬT: Thêm để giải nén database
-import time     # <--- CẬP NHẬT: Thêm để xử lý thời gian
+import zipfile
+import time
 
 # --- CẤU HÌNH ĐƯỜNG DẪN ĐỂ IMPORT FILE TỪ THƯ MỤC KHÁC ---
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -43,10 +43,9 @@ st.set_page_config(
 if "GOOGLE_API_KEY" in st.secrets:
     os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
     config.GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-# ---------------------------------------------------
 
 # =========================================================
-# 🛡️ 4. VẮC-XIN BẢO VỆ (CHỐNG DỊCH CHO WEB)
+# 🛡️ 4. VẮC-XIN BẢO VỆ (CHỐNG LỖI removeChild KHI DỊCH TRANG)
 # =========================================================
 components.html("""
 <script>
@@ -80,61 +79,22 @@ components.html("""
 # =========================================================
 st.markdown("""
 <style>
-    /* 1. RESET FONT */
     html, body, [class*="css"] {
         font-family: 'Source Sans Pro', sans-serif;
         font-size: 16px; 
     }
-
-    /* 2. SIDEBAR */
     section[data-testid="stSidebar"] {
         padding-top: 1rem; 
         border-right: 1px solid #e0e0e0;
     }
-    
-    section[data-testid="stSidebar"] .block-container {
-        padding-left: 0.5rem; 
-        padding-right: 0.5rem;
-    }
-
-    section[data-testid="stSidebar"] h1, 
-    section[data-testid="stSidebar"] h2, 
-    section[data-testid="stSidebar"] h3 {
-        font-size: 18px !important;
-    }
-
-    section[data-testid="stSidebar"] p, 
-    section[data-testid="stSidebar"] li, 
-    section[data-testid="stSidebar"] label,
-    section[data-testid="stSidebar"] .stRadio div {
-        font-size: 14px !important; 
-    }
-    
-    section[data-testid="stSidebar"] button {
-        font-size: 13px !important;
-        padding: 0.25rem 0.5rem;
-    }
-
-    div[data-testid="stHorizontalBlock"] button[kind="primary"] {
-        background-color: #ff4b4b !important;
-        border-color: #ff4b4b !important;
-    }
-    
-    /* 3. KHU VỰC CHAT CHÍNH */
     .stChatMessage p {
         font-size: 17px !important;
         line-height: 1.6;
     }
-
-    [data-testid="InputInstructions"] {
-        display: none !important;
-    }
-    
     .main .block-container {
         padding-top: 1.5rem;
         max-width: 900px; 
     }
-
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     .stException { display: none !important; }
@@ -147,9 +107,7 @@ st.markdown("""
 # =========================================================
 @st.cache_resource
 def load_resources():
-    # --- TỰ ĐỘNG GIẢI NÉN DATABASE (Xử lý cả lỗi tên file zip.zip) ---
     db_path = os.path.join(config.CHROMA_DB_DIR, "chroma.sqlite3")
-    
     zip_path = db_path + ".zip"
     if not os.path.exists(zip_path):
         zip_path_double = db_path + ".zip.zip"
@@ -163,7 +121,6 @@ def load_resources():
         except Exception as e:
             st.error(f"Lỗi giải nén: {e}")
 
-    # --- TẢI DATABASE & AI ---
     vector_db = None
     if os.path.exists(config.CHROMA_DB_DIR):
         try:
@@ -173,15 +130,13 @@ def load_resources():
             pass
     
     llm = None
-    # CẬP NHẬT: Sử dụng config đã được nạp Key từ Secrets
     if config.GOOGLE_API_KEY:
-        llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.3, google_api_key=config.GOOGLE_API_KEY)
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3, google_api_key=config.GOOGLE_API_KEY)
         
     return vector_db, llm
 
 vector_db, llm = load_resources()
 
-# --- HÀM XỬ LÝ TRẢ LỜI ---
 def get_bot_response(user_query, history):
     if not vector_db or not llm: return "⚠️ Hệ thống đang bảo trì (Chưa kết nối Database/AI)."
     try:
@@ -207,12 +162,12 @@ def get_bot_response(user_query, history):
 
         NHIỆM VỤ CỦA BẠN:
         1. THÂN THIỆN: Phản hồi bằng giọng điệu quan tâm, cảm thông.
-        2. PHÂN TÍCH & HỎI THÊM (QUAN TRỌNG): Đừng vội kết luận. Hãy dựa vào thông tin người dùng đưa ra, phân tích các khả năng và ĐẶT 2-3 CÂU HỎI đào sâu (ví dụ: bị bao lâu rồi, đau ở vị trí nào chính xác, có kèm sốt không...) để có thêm cơ sở chẩn đoán.
+        2. PHÂN TÍCH & HỎI THÊM (QUAN TRỌNG): Đừng vội kết luận. Hãy dựa vào thông tin người dùng đưa ra, phân tích các khả năng và ĐẶT 2-3 CÂU HỎI đào sâu để có thêm cơ sở chẩn đoán.
         3. CHẨN ĐOÁN TẠM THỜI: Đưa ra một vài giả thuyết về căn bệnh dựa trên kiến thức y khoa có sẵn.
         4. CHỈ ĐỊNH CHUYÊN KHOA: Tư vấn rõ ràng khoa nào cần khám và mức độ khẩn cấp.
         5. LỜI KHUYÊN: Các biện pháp chăm sóc tại nhà hoặc lưu ý an toàn.
 
-        ĐỊNH DẠNGMarkdown:
+        ĐỊNH DẠNG Markdown:
         (Câu chào cảm thông tự nhiên)
 
         ### 🔍 Phân tích sơ bộ:
@@ -234,18 +189,9 @@ def get_bot_response(user_query, history):
         """
         response = llm.invoke(prompt)
         content = response.content
-        final_ans = ""
-        if isinstance(content, list):
-            for item in content:
-                if isinstance(item, str): final_ans += item
-                elif isinstance(item, dict) and 'text' in item: final_ans += item['text']
-        else:
-            final_ans = str(content)
+        final_ans = str(content)
         return final_ans + citation_text
     except Exception as e: return f"❌ Lỗi: {e}"
-
-# --- PHẦN CÒN LẠI GIỮ NGUYÊN ---
-# (Session state, Sidebar, và Main Content giữ nguyên như bản của bạn)
 
 # --- SESSION STATE ---
 if "user_info" not in st.session_state: st.session_state.user_info = None 
@@ -262,87 +208,27 @@ with st.sidebar:
     if st.session_state.user_info:
         user = st.session_state.user_info
         st.success(f"👋 Hi, {user['full_name']}")
-        
         if st.button("➕ Ca mới", use_container_width=True):
             st.session_state.current_conv_id = None
             st.rerun()
-            
-        st.divider()
-        st.write("📂 **Lịch sử:**")
-        
-        convs = database.get_user_conversations(user['id'])
-        if not convs: st.caption("Trống.")
-        
-        for conv in convs:
-            col1, col2 = st.columns([0.85, 0.15]) 
-            
-            with col1:
-                if st.session_state.delete_confirm_id == conv['id']:
-                    st.caption("⚠️ Xóa nhé?")
-                    conf_col1, conf_col2 = st.columns(2)
-                    with conf_col1:
-                        if st.button("Có", key=f"yes_{conv['id']}", type="primary", use_container_width=True):
-                            database.delete_conversation(conv['id'])
-                            st.session_state.delete_confirm_id = None
-                            if st.session_state.current_conv_id == conv['id']:
-                                st.session_state.current_conv_id = None
-                            st.rerun()
-                    with conf_col2:
-                        if st.button("Hủy", key=f"no_{conv['id']}", use_container_width=True):
-                            st.session_state.delete_confirm_id = None
-                            st.rerun()
-                else:
-                    icon = "📌 " if conv.get('is_pinned', 0) else "💬 "
-                    label = f"{icon}{conv['title'][:18]}..."
-                    if st.button(label, key=f"btn_{conv['id']}", use_container_width=True):
-                        st.session_state.current_conv_id = conv['id']
-                        st.rerun()
-            
-            with col2:
-                if st.session_state.delete_confirm_id != conv['id']:
-                    with st.popover("⋮", use_container_width=True):
-                        is_pinned = conv.get('is_pinned', 0)
-                        pin_label = "Bỏ ghim" if is_pinned else "Ghim"
-                        
-                        if st.button(pin_label, key=f"pin_{conv['id']}", use_container_width=True):
-                            database.toggle_pin_conversation(conv['id'], is_pinned)
-                            st.rerun()
-                            
-                        if st.button("Xóa", key=f"trig_del_{conv['id']}", use_container_width=True):
-                            st.session_state.delete_confirm_id = conv['id']
-                            st.rerun()
-
         st.divider()
         if st.button("🚪 Đăng Xuất"):
             st.session_state.user_info = None
-            st.session_state.current_conv_id = None
-            st.session_state.guest_messages = []
             st.rerun()
     else:
         st.info("Chế độ: **Khách**")
-        st.caption("Chat với Bác sĩ AI.")
-        st.divider()
-        
         mode = st.radio("Tài khoản:", ["Đăng Nhập", "Đăng Ký"], horizontal=True)
-        
-        if mode == "Đăng Nhập":
-            with st.form("login_form"):
-                u = st.text_input("User")
-                p = st.text_input("Pass", type="password")
-                if st.form_submit_button("Vào chat", use_container_width=True):
+        with st.form("auth_form"):
+            u = st.text_input("User")
+            p = st.text_input("Pass", type="password")
+            if st.form_submit_button("Xác nhận", use_container_width=True):
+                if mode == "Đăng Nhập":
                     user = database.login_user(u, p)
-                    if user:
-                        st.session_state.user_info = user
-                        st.rerun()
-                    else: st.error("Sai rồi!")
-        else: 
-            with st.form("reg_form"):
-                nu = st.text_input("User Mới")
-                np = st.text_input("Pass Mới", type="password")
-                nn = st.text_input("Họ Tên")
-                if st.form_submit_button("Đăng ký", use_container_width=True):
-                    ok, msg = database.register_user(nu, np, nn)
-                    if ok: st.success("Xong!")
+                    if user: st.session_state.user_info = user; st.rerun()
+                    else: st.error("Sai thông tin!")
+                else:
+                    ok, msg = database.register_user(u, p, u)
+                    if ok: st.success("Đã đăng ký!"); st.rerun()
                     else: st.error(msg)
 
 # ==========================================
@@ -374,9 +260,7 @@ if prompt := st.chat_input("Kể triệu chứng cho mình nghe..."):
     if st.session_state.user_info:
         uid = st.session_state.user_info['id']
         if st.session_state.current_conv_id is None:
-            title = (prompt[:30] + '..') if len(prompt) > 30 else prompt
-            new_id = database.create_conversation(uid, title)
-            st.session_state.current_conv_id = new_id
+            st.session_state.current_conv_id = database.create_conversation(uid, prompt[:30])
         database.save_message(st.session_state.current_conv_id, "user", prompt)
         database.save_message(st.session_state.current_conv_id, "assistant", response)
     else:
