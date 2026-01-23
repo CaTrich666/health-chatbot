@@ -15,8 +15,8 @@ import streamlit as st
 import streamlit.components.v1 as components 
 import os
 import sys
-import zipfile 
-import time
+import zipfile  # <--- CẬP NHẬT: Thêm để giải nén database
+import time     # <--- CẬP NHẬT: Thêm để xử lý thời gian
 
 # --- CẤU HÌNH ĐƯỜNG DẪN ĐỂ IMPORT FILE TỪ THƯ MỤC KHÁC ---
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -43,11 +43,11 @@ st.set_page_config(
 if "GOOGLE_API_KEY" in st.secrets:
     os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
     config.GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+# ---------------------------------------------------
 
 # =========================================================
-# 🛡️ 4. VẮC-XIN BẢO VỆ GIAO DIỆN (KHÔI PHỤC)
+# 🛡️ 4. VẮC-XIN BẢO VỆ (CHỐNG DỊCH CHO WEB)
 # =========================================================
-# Giúp ngăn chặn lỗi "Failed to execute 'removeChild' on 'Node'" do Google Translate gây ra.
 components.html("""
 <script>
     function addProtection(element) {
@@ -147,7 +147,7 @@ st.markdown("""
 # =========================================================
 @st.cache_resource
 def load_resources():
-    # --- TỰ ĐỘNG GIẢI NÉN DATABASE ---
+    # --- TỰ ĐỘNG GIẢI NÉN DATABASE (Xử lý cả lỗi tên file zip.zip) ---
     db_path = os.path.join(config.CHROMA_DB_DIR, "chroma.sqlite3")
     
     zip_path = db_path + ".zip"
@@ -173,8 +173,9 @@ def load_resources():
             pass
     
     llm = None
+    # CẬP NHẬT: Sử dụng config đã được nạp Key từ Secrets
     if config.GOOGLE_API_KEY:
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.3, google_api_key=config.GOOGLE_API_KEY)
+        llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.3, google_api_key=config.GOOGLE_API_KEY)
         
     return vector_db, llm
 
@@ -211,24 +212,40 @@ def get_bot_response(user_query, history):
         4. CHỈ ĐỊNH CHUYÊN KHOA: Tư vấn rõ ràng khoa nào cần khám và mức độ khẩn cấp.
         5. LỜI KHUYÊN: Các biện pháp chăm sóc tại nhà hoặc lưu ý an toàn.
 
-        ĐỊNH DẠNG Markdown:
-        (Chào hỏi tự nhiên)
+        ĐỊNH DẠNGMarkdown:
+        (Câu chào cảm thông tự nhiên)
+
         ### 🔍 Phân tích sơ bộ:
-        (Phân tích)
+        (Phân tích các triệu chứng người dùng vừa kể)
+
         ### 🩺 Để hiểu rõ hơn, cậu cho mình hỏi thêm nhé:
-        (Câu hỏi đào sâu)
+        (Đặt các câu hỏi thông minh để thu hẹp phạm vi chẩn đoán)
+
         ### 💡 Có thể cậu đang gặp vấn đề về:
-        (Giả thuyết)
+        (Nêu các giả thuyết bệnh lý dựa trên kiến thức)
+
         ### 👉 Chuyên khoa cậu nên ghé khám:
-        **[TÊN CHUYÊN KHOA]**
+        **[TÊN CHUYÊN KHOA]** - (Lý do vì sao chọn khoa này)
+
         ### 📝 Lưu ý cho cậu:
-        (Dặn dò)
+        (Dặn dò chăm sóc sức khỏe)
+
+        (Câu chốt tình cảm)
         """
         response = llm.invoke(prompt)
         content = response.content
-        final_ans = str(content)
+        final_ans = ""
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, str): final_ans += item
+                elif isinstance(item, dict) and 'text' in item: final_ans += item['text']
+        else:
+            final_ans = str(content)
         return final_ans + citation_text
     except Exception as e: return f"❌ Lỗi: {e}"
+
+# --- PHẦN CÒN LẠI GIỮ NGUYÊN ---
+# (Session state, Sidebar, và Main Content giữ nguyên như bản của bạn)
 
 # --- SESSION STATE ---
 if "user_info" not in st.session_state: st.session_state.user_info = None 
@@ -258,6 +275,7 @@ with st.sidebar:
         
         for conv in convs:
             col1, col2 = st.columns([0.85, 0.15]) 
+            
             with col1:
                 if st.session_state.delete_confirm_id == conv['id']:
                     st.caption("⚠️ Xóa nhé?")
@@ -279,14 +297,17 @@ with st.sidebar:
                     if st.button(label, key=f"btn_{conv['id']}", use_container_width=True):
                         st.session_state.current_conv_id = conv['id']
                         st.rerun()
+            
             with col2:
                 if st.session_state.delete_confirm_id != conv['id']:
                     with st.popover("⋮", use_container_width=True):
                         is_pinned = conv.get('is_pinned', 0)
                         pin_label = "Bỏ ghim" if is_pinned else "Ghim"
+                        
                         if st.button(pin_label, key=f"pin_{conv['id']}", use_container_width=True):
                             database.toggle_pin_conversation(conv['id'], is_pinned)
                             st.rerun()
+                            
                         if st.button("Xóa", key=f"trig_del_{conv['id']}", use_container_width=True):
                             st.session_state.delete_confirm_id = conv['id']
                             st.rerun()
@@ -299,7 +320,11 @@ with st.sidebar:
             st.rerun()
     else:
         st.info("Chế độ: **Khách**")
+        st.caption("Chat với Bác sĩ AI.")
+        st.divider()
+        
         mode = st.radio("Tài khoản:", ["Đăng Nhập", "Đăng Ký"], horizontal=True)
+        
         if mode == "Đăng Nhập":
             with st.form("login_form"):
                 u = st.text_input("User")
