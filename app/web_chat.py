@@ -9,14 +9,14 @@ except ImportError:
     pass
 
 # =========================================================
-# 📚 2. CÁC THƯ VIỆN CẦN THIẾT (ĐÃ BỔ SUNG ĐẦY ĐỦ)
+# 📚 2. CÁC THƯ VIỆN CẦN THIẾT
 # =========================================================
 import streamlit as st
 import streamlit.components.v1 as components 
 import os
 import sys
-import zipfile  # <--- QUAN TRỌNG: Đã thêm để giải nén file zip
-import time     # <--- QUAN TRỌNG: Đã thêm để xử lý thời gian
+import zipfile  # <--- CẬP NHẬT: Thêm để giải nén database
+import time     # <--- CẬP NHẬT: Thêm để xử lý thời gian
 
 # --- CẤU HÌNH ĐƯỜNG DẪN ĐỂ IMPORT FILE TỪ THƯ MỤC KHÁC ---
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,9 +39,11 @@ st.set_page_config(
     initial_sidebar_state="expanded" 
 )
 
-# Tự động nạp Key từ Secrets (Dành cho Cloud)
-if "GEMINI_API_KEY" in st.secrets:
-    os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+# --- CẬP NHẬT: ĐỒNG BỘ KEY TỪ SECRETS VÀO HỆ THỐNG ---
+if "GOOGLE_API_KEY" in st.secrets:
+    os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
+    config.GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+# ---------------------------------------------------
 
 # =========================================================
 # 🛡️ 4. VẮC-XIN BẢO VỆ (CHỐNG DỊCH CHO WEB)
@@ -146,41 +148,34 @@ st.markdown("""
 @st.cache_resource
 def load_resources():
     # --- TỰ ĐỘNG GIẢI NÉN DATABASE (Xử lý cả lỗi tên file zip.zip) ---
-    
     db_path = os.path.join(config.CHROMA_DB_DIR, "chroma.sqlite3")
     
-    # Ưu tiên tìm file tên chuẩn
     zip_path = db_path + ".zip"
-    
-    # Nếu không thấy, tìm thử file bị tên kép (zip.zip)
     if not os.path.exists(zip_path):
         zip_path_double = db_path + ".zip.zip"
         if os.path.exists(zip_path_double):
             zip_path = zip_path_double
 
-    # Logic giải nén
     if not os.path.exists(db_path) and os.path.exists(zip_path):
-        print(f"📦 Đang giải nén dữ liệu từ {zip_path}...")
         try:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(config.CHROMA_DB_DIR)
-            print("✅ Giải nén thành công!")
         except Exception as e:
-            print(f"⚠️ Lỗi giải nén: {e}")
+            st.error(f"Lỗi giải nén: {e}")
 
     # --- TẢI DATABASE & AI ---
     vector_db = None
     if os.path.exists(config.CHROMA_DB_DIR):
         try:
-            print("🔄 Đang tải Vector DB...")
             embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", model_kwargs={'device': 'cpu'})
             vector_db = Chroma(persist_directory=config.CHROMA_DB_DIR, embedding_function=embedding_model)
         except Exception as e:
-            print(f"⚠️ Không tải được DB: {e}")
+            pass
     
     llm = None
+    # CẬP NHẬT: Sử dụng config đã được nạp Key từ Secrets
     if config.GOOGLE_API_KEY:
-        llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.3, google_api_key=config.GOOGLE_API_KEY)
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3, google_api_key=config.GOOGLE_API_KEY)
         
     return vector_db, llm
 
@@ -242,6 +237,9 @@ def get_bot_response(user_query, history):
             final_ans = str(content)
         return final_ans + citation_text
     except Exception as e: return f"❌ Lỗi: {e}"
+
+# --- PHẦN CÒN LẠI GIỮ NGUYÊN ---
+# (Session state, Sidebar, và Main Content giữ nguyên như bản của bạn)
 
 # --- SESSION STATE ---
 if "user_info" not in st.session_state: st.session_state.user_info = None 
