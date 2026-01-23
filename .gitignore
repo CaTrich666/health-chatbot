@@ -1,0 +1,15 @@
+# --- FILE RÁC HỆ THỐNG ---
+__pycache__/
+*.pyc
+
+# --- BẢO MẬT (QUAN TRỌNG) ---
+.env
+.streamlit/secrets.toml
+
+# --- DỮ LIỆU ---
+# Bình thường người ta chặn data, nhưng bạn cần up nên mình thêm dấu # để mở khóa
+# data/ 
+# chroma_db_diagnosis/
+
+# Nếu bạn muốn up thư mục data, hãy đảm bảo KHÔNG CÓ dòng nào ghi là "data/" ở đây (hoặc phải có dấu # ở trước)
+*.sqlite3
