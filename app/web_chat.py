@@ -175,7 +175,7 @@ def load_resources():
     llm = None
     # CẬP NHẬT: Sử dụng config đã được nạp Key từ Secrets
     if config.GOOGLE_API_KEY:
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3, google_api_key=config.GOOGLE_API_KEY)
+        llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.3, google_api_key=config.GOOGLE_API_KEY)
         
     return vector_db, llm
 
