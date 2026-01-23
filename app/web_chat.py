@@ -263,7 +263,7 @@ with st.sidebar:
         user = st.session_state.user_info
         st.success(f"👋 Hi, {user['full_name']}")
         
-        if st.button("➕ Ca mới", use_container_width=True):
+        if st.button("➕ Tạo đoạn chat mới", use_container_width=True):
             st.session_state.current_conv_id = None
             st.rerun()
             
