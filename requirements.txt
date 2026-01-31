@@ -10,3 +10,5 @@ chromadb
 google-generativeai
 sentence-transformers
 pysqlite3-binary
+bcrypt
+supabase

@@ -1,129 +1,125 @@
-import sqlite3
-import datetime
+import streamlit as st
+from supabase import create_client, Client
+import bcrypt
+import uuid
+from datetime import datetime
 import os
-from src import config
 
-# Đảm bảo thư mục data tồn tại
-if not os.path.exists(config.DATA_DIR):
-    os.makedirs(config.DATA_DIR)
-
-DB_PATH = os.path.join(config.DATA_DIR, "chat_history.db")
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # Bảng user
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  username TEXT UNIQUE, 
-                  password TEXT, 
-                  full_name TEXT)''')
+# --- 1. KẾT NỐI SUPABASE TỪ SECRETS ---
+try:
+    # Lấy thông tin từ Secrets mà bạn vừa cấu hình
+    url: str = st.secrets["SUPABASE_URL"]
+    key: str = st.secrets["SUPABASE_KEY"]
     
-    # Bảng conversations (Thêm cột is_pinned)
-    c.execute('''CREATE TABLE IF NOT EXISTS conversations
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  user_id INTEGER, 
-                  title TEXT, 
-                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                  is_pinned INTEGER DEFAULT 0)''') # 0: Không ghim, 1: Ghim
-    
-    # Bảng messages
-    c.execute('''CREATE TABLE IF NOT EXISTS messages
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  conversation_id INTEGER, 
-                  role TEXT, 
-                  content TEXT, 
-                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-    
-    # --- MIGRATION (Tự động thêm cột is_pinned nếu database cũ chưa có) ---
-    try:
-        c.execute("ALTER TABLE conversations ADD COLUMN is_pinned INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass # Cột đã tồn tại, bỏ qua
-        
-    conn.commit()
-    conn.close()
+    # Tạo kết nối
+    supabase: Client = create_client(url, key)
+except Exception as e:
+    st.error(f"⚠️ Lỗi kết nối Supabase: {e}. Hãy kiểm tra lại Secrets!")
+    supabase = None
 
-# --- USER ---
+# --- 2. XỬ LÝ TÀI KHOẢN (ĐĂNG KÝ/ĐĂNG NHẬP) ---
 def register_user(username, password, full_name):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    if not supabase: return False, "Mất kết nối Database."
     try:
-        c.execute("INSERT INTO users (username, password, full_name) VALUES (?, ?, ?)", 
-                  (username, password, full_name))
-        conn.commit()
-        return True, "Đăng ký thành công!"
-    except sqlite3.IntegrityError:
-        return False, "Tên đăng nhập đã tồn tại."
-    finally:
-        conn.close()
+        # Mã hóa mật khẩu trước khi lưu
+        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        data = {
+            "username": username,
+            "password": hashed,
+            "full_name": full_name
+        }
+        # Gửi lên mây
+        response = supabase.table("users").insert(data).execute()
+        
+        if response.data:
+            return True, "Đăng ký thành công!"
+        return False, "Không thể tạo tài khoản."
+            
+    except Exception as e:
+        if "duplicate key" in str(e): # Lỗi trùng tên đăng nhập
+            return False, "Tên đăng nhập đã tồn tại."
+        return False, f"Lỗi kỹ thuật: {e}"
 
 def login_user(username, password):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
-    user = c.fetchone()
-    conn.close()
-    if user: return dict(user)
-    return None
+    if not supabase: return None
+    try:
+        # Tìm user trên mây
+        response = supabase.table("users").select("*").eq("username", username).execute()
+        
+        if not response.data:
+            return None # Không tìm thấy user
+            
+        user = response.data[0]
+        stored_hash = user['password']
+        
+        # So khớp mật khẩu
+        if bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
+            return user
+        return None
+    except Exception as e:
+        print(f"Lỗi đăng nhập: {e}")
+        return None
 
-# --- CONVERSATION ---
-def create_conversation(user_id, title):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT INTO conversations (user_id, title) VALUES (?, ?)", (user_id, title))
-    conv_id = c.lastrowid
-    conn.commit()
-    conn.close()
-    return conv_id
-
+# --- 3. QUẢN LÝ HỘI THOẠI (LỊCH SỬ CHAT) ---
 def get_user_conversations(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    # Sắp xếp: Tin ghim lên trước (DESC), sau đó đến tin mới nhất
-    c.execute("""
-        SELECT * FROM conversations 
-        WHERE user_id = ? 
-        ORDER BY is_pinned DESC, created_at DESC
-    """, (user_id,))
-    rows = c.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    if not supabase: return []
+    try:
+        # Lấy danh sách chat, ưu tiên Ghim lên đầu, sau đó đến Mới nhất
+        response = supabase.table("conversations")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .order("is_pinned", desc=True)\
+            .order("created_at", desc=True)\
+            .execute()
+        return response.data
+    except: return []
 
-# --- MESSAGE ---
-def save_message(conv_id, role, content):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)", 
-              (conv_id, role, content))
-    conn.commit()
-    conn.close()
+def create_conversation(user_id, title):
+    if not supabase: return None
+    try:
+        data = {"user_id": user_id, "title": title}
+        response = supabase.table("conversations").insert(data).execute()
+        if response.data:
+            return response.data[0]['id']
+        return None
+    except: return None
 
-def load_messages(conv_id):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at ASC", (conv_id,))
-    rows = c.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
-
-# --- NEW FEATURES: DELETE & PIN ---
 def delete_conversation(conv_id):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
-    c.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
-    conn.commit()
-    conn.close()
+    if not supabase: return
+    try:
+        supabase.table("conversations").delete().eq("id", conv_id).execute()
+    except: pass
 
 def toggle_pin_conversation(conv_id, current_status):
-    """Đổi trạng thái ghim: Nếu đang ghim -> bỏ ghim, và ngược lại"""
-    new_status = 0 if current_status == 1 else 1
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE conversations SET is_pinned = ? WHERE id = ?", (new_status, conv_id))
-    conn.commit()
-    conn.close()
+    if not supabase: return
+    try:
+        # Đảo ngược trạng thái ghim (True <-> False)
+        new_status = not current_status
+        supabase.table("conversations").update({"is_pinned": new_status}).eq("id", conv_id).execute()
+    except: pass
+
+# --- 4. XỬ LÝ TIN NHẮN CHI TIẾT ---
+def load_messages(conv_id):
+    if not supabase: return []
+    try:
+        # Load tin nhắn cũ nhất lên trước (để đọc từ trên xuống)
+        response = supabase.table("messages")\
+            .select("role, content")\
+            .eq("conversation_id", conv_id)\
+            .order("created_at", desc=False)\
+            .execute()
+        return response.data
+    except: return []
+
+def save_message(conv_id, role, content):
+    if not supabase: return
+    try:
+        data = {
+            "conversation_id": conv_id,
+            "role": role,
+            "content": content
+        }
+        supabase.table("messages").insert(data).execute()
+    except Exception as e:
+        print(f"Lỗi lưu tin nhắn: {e}")
