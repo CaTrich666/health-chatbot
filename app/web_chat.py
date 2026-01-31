@@ -245,7 +245,7 @@ def get_bot_response(user_query, history):
     except Exception as e: return f"❌ Lỗi: {e}"
 
 # --- PHẦN CÒN LẠI GIỮ NGUYÊN ---
-# (Session state, Sidebar, và Main Content giữ nguyên như bản của bạn)
+# (Session state, Sidebar, và Main Content)
 
 # --- SESSION STATE ---
 if "user_info" not in st.session_state: st.session_state.user_info = None 
@@ -254,7 +254,7 @@ if "guest_messages" not in st.session_state: st.session_state.guest_messages = [
 if "delete_confirm_id" not in st.session_state: st.session_state.delete_confirm_id = None
 
 # ==========================================
-# 🛑 7. SIDEBAR (GIAO DIỆN TRÁI)
+# 🛑 7. SIDEBAR
 # ==========================================
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3774/3774299.png", width=70)

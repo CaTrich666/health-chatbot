@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src import config
 from src.services import embedding_service, database_service
 
-# Kích thước mỗi gói nạp (Nạp 500 dòng lưu 1 lần cho nhẹ máy)
+# Kích thước mỗi gói nạp
 BATCH_SIZE = 500 
 
 def process_in_batches(documents, db_function, total_docs):
@@ -33,7 +33,7 @@ def main():
     # 1. Khởi tạo Embedding Local
     embeddings = embedding_service.get_embedding_model()
     
-    # 2. Đọc dữ liệu (Đọc hết lên RAM vẫn ổn, chỉ khi Vector hóa mới nặng)
+    # 2. Đọc dữ liệu
     all_documents = []
     
     print(f"\n1️⃣  Đang đọc dữ liệu từ: {config.RAW_DATA_DIR}")

@@ -114,8 +114,8 @@ def load_messages(conv_id):
 def delete_conversation(conv_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,)) # Xóa tin nhắn
-    c.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))         # Xóa hội thoại
+    c.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
+    c.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
     conn.commit()
     conn.close()
 
