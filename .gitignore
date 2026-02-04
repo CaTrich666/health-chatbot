@@ -9,3 +9,5 @@ __pycache__/
 # --- DỮ LIỆU ---
 
 *.sqlite3
+
+.streamlit/secrets.toml

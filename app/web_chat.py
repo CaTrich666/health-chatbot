@@ -1,6 +1,3 @@
-# =========================================================
-# 🛠️ 1. THUỐC ĐẶC TRỊ LỖI SQLITE (BẮT BUỘC ĐỂ ĐẦU TIÊN)
-# =========================================================
 try:
     __import__('pysqlite3')
     import sys
@@ -15,10 +12,10 @@ import streamlit as st
 import streamlit.components.v1 as components 
 import os
 import sys
-import zipfile  # <--- CẬP NHẬT: Thêm để giải nén database
-import time     # <--- CẬP NHẬT: Thêm để xử lý thời gian
+import zipfile
+import time
 
-# --- CẤU HÌNH ĐƯỜNG DẪN ĐỂ IMPORT FILE TỪ THƯ MỤC KHÁC ---
+# --- CẤU HÌNH ĐƯỜNG DẪN ĐỂ IMPORT FILE ---
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
@@ -46,7 +43,7 @@ if "GOOGLE_API_KEY" in st.secrets:
 # ---------------------------------------------------
 
 # =========================================================
-# 🛡️ 4. VẮC-XIN BẢO VỆ (CHỐNG DỊCH CHO WEB)
+# BẢO VỆ GIAO DIỆN KHÔNG ẢNH HƯỞNG DO Google Translate CỦA WEB ẢNH HƯỞNG
 # =========================================================
 components.html("""
 <script>
@@ -57,19 +54,22 @@ components.html("""
         }
     }
     const observer = new MutationObserver((mutations) => {
+        // Bảo vệ Sidebar
         const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
         addProtection(sidebar);
-        const radios = window.parent.document.querySelectorAll('[data-testid="stRadio"]');
-        radios.forEach(addProtection);
-        const buttons = window.parent.document.querySelectorAll('button');
-        buttons.forEach(addProtection);
-        const inputs = window.parent.document.querySelectorAll('input, textarea');
+        
+        // Bảo vệ các nút bấm, ô nhập liệu
+        const inputs = window.parent.document.querySelectorAll('input, textarea, button, select');
         inputs.forEach(addProtection);
-        const forms = window.parent.document.querySelectorAll('[data-testid="stForm"]');
-        forms.forEach(addProtection);
-        const popovers = window.parent.document.querySelectorAll('[data-testid="stPopover"]');
-        popovers.forEach(addProtection);
+        
+        // CẬP NHẬT MỚI: Bảo vệ bong bóng chat và nội dung chat
+        const chatMessages = window.parent.document.querySelectorAll('[data-testid="stChatMessage"]');
+        chatMessages.forEach(addProtection);
+        
+        const chatContent = window.parent.document.querySelectorAll('.stMarkdown');
+        chatContent.forEach(addProtection);
     });
+    
     const config = { childList: true, subtree: true, attributes: false };
     observer.observe(window.parent.document.body, config);
 </script>
@@ -147,7 +147,6 @@ st.markdown("""
 # =========================================================
 @st.cache_resource
 def load_resources():
-    # --- TỰ ĐỘNG GIẢI NÉN DATABASE (Xử lý cả lỗi tên file zip.zip) ---
     db_path = os.path.join(config.CHROMA_DB_DIR, "chroma.sqlite3")
     
     zip_path = db_path + ".zip"
@@ -173,7 +172,6 @@ def load_resources():
             pass
     
     llm = None
-    # CẬP NHẬT: Sử dụng config đã được nạp Key từ Secrets
     if config.GOOGLE_API_KEY:
         llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.3, google_api_key=config.GOOGLE_API_KEY)
         
@@ -181,58 +179,99 @@ def load_resources():
 
 vector_db, llm = load_resources()
 
+
+
+
 # --- HÀM XỬ LÝ TRẢ LỜI ---
 def get_bot_response(user_query, history):
+    # 1. Kiểm tra kết nối
     if not vector_db or not llm: return "⚠️ Hệ thống đang bảo trì (Chưa kết nối Database/AI)."
+    
     try:
-        docs = vector_db.similarity_search(user_query, k=4)
+        # 2. RAG - TÌM KIẾM CÓ CHỌN LỌC (LỌC ĐỘ CHÍNH XÁC)
+        # ---------------------------------------------------------
+        # Thay vì chỉ tìm kiếm, ta lấy thêm cả điểm số (Score) để biết độ giống
+        # ChromaDB Score: 0 là giống hệt. Càng lớn là càng khác.
+        results = vector_db.similarity_search_with_score(user_query, k=4)
+        
+        docs = []
+        # THRESHOLD (NGƯỠNG LỌC): 
+        # Chỉ lấy tài liệu có điểm < 1.2 (Con số này đảm bảo chỉ lấy tài liệu thực sự liên quan)
+        for doc, score in results:
+            if score < 1.2: 
+                docs.append(doc)
+                
         sources = []
+        context = ""
+        citation_text = ""
+        
+        # Chỉ khi sau khi lọc mà vẫn còn tài liệu thì mới tạo list nguồn
         if docs:
             for doc in docs:
                 src = doc.metadata.get("source", "Tài liệu y khoa")
                 if src not in sources: sources.append(src)
             context = "\n".join([d.page_content for d in docs])
-            citation_text = "\n\n---\n**📚 Tài liệu mình tham khảo:**\n" + "\n".join([f"- {s}" for s in sources])
+            citation_text = "\n\n---\n**📚 Tài liệu tham khảo:**\n" + "\n".join([f"- {s}" for s in sources])
         else:
-            context = "Không có dữ liệu cụ thể."
-            citation_text = "\n\n---\n*Theo kiến thức chuyên môn của mình.*"
+            # Nếu lọc xong không còn gì (VD: Hỏi thất tình, hỏi xã giao) -> Dùng kiến thức chung
+            context = "Không có dữ liệu cụ thể trong kho, dùng kiến thức y khoa tổng quát."
+            citation_text = "" # Chuỗi này rỗng để tí nữa bộ lọc ở bước 5 bắt được
         
+        # 3. PROMPT ENGINEERING (GIỮ NGUYÊN CẤU TRÚC ĐẦY ĐỦ NHƯ BẠN YÊU CẦU)
+        # ---------------------------------------------------------
         prompt = f"""
-        VAI TRÒ: Bạn là một Bác sĩ giỏi, tận tâm và đang chat với BẠN THÂN (Xưng hô: Mình - Bạn). 
+        VAI TRÒ: Bạn là "Người Bạn Bác Sĩ" (Health Chatbot) - Giỏi chuyên môn nhưng nói chuyện ân cần như bạn thân (Xưng hô: Mình - Bạn/Cậu).
 
-        DỮ LIỆU THAM KHẢO:
-        - Lịch sử trò chuyện: {history}
-        - Kiến thức y khoa tìm được: {context}
-        - Câu hỏi hiện tại: "{user_query}"
+        DỮ LIỆU ĐẦU VÀO:
+        - Lịch sử chat: {history}
+        - Kiến thức Y khoa (RAG): {context}
+        - User vừa nói: "{user_query}"
 
-        NHIỆM VỤ CỦA BẠN:
-        1. THÂN THIỆN: Phản hồi bằng giọng điệu quan tâm, cảm thông.
-        2. PHÂN TÍCH & HỎI THÊM (QUAN TRỌNG): Đừng vội kết luận. Hãy dựa vào thông tin người dùng đưa ra, phân tích các khả năng và ĐẶT 2-3 CÂU HỎI đào sâu (ví dụ: bị bao lâu rồi, đau ở vị trí nào chính xác, có kèm sốt không...) để có thêm cơ sở chẩn đoán.
-        3. CHẨN ĐOÁN TẠM THỜI: Đưa ra một vài giả thuyết về căn bệnh dựa trên kiến thức y khoa có sẵn.
-        4. CHỈ ĐỊNH CHUYÊN KHOA: Tư vấn rõ ràng khoa nào cần khám và mức độ khẩn cấp.
-        5. LỜI KHUYÊN: Các biện pháp chăm sóc tại nhà hoặc lưu ý an toàn.
+        NHIỆM VỤ: HÃY XÁC ĐỊNH Ý ĐỊNH CỦA USER ĐỂ CHỌN 1 TRONG 2 CHẾ ĐỘ TRẢ LỜI:
 
-        ĐỊNH DẠNGMarkdown:
-        (Câu chào cảm thông tự nhiên)
+        ════════════════════════════════════════════════════
+        MODE 1: XÃ GIAO / CẢM XÚC (Khi User chào, cảm ơn, khen, chê, tạm biệt)
+        ════════════════════════════════════════════════════
+        - Nếu User nói "Hello", "Hi", "Chào": Trả lời vui vẻ, ngắn gọn, hỏi thăm sức khỏe.
+        - Nếu User nói "Cảm ơn", "Hay quá", "Ok": Đáp lại lịch sự (VD: "Không có chi, chúc bạn mau khỏe nhé!").
+        - QUY TẮC CỨNG: KHÔNG được dùng cấu trúc khám bệnh (###) trong trường hợp này.
+
+        ════════════════════════════════════════════════════
+        MODE 2: TƯ VẤN Y KHOA (Khi User kể bệnh, hỏi thuốc, lo lắng)
+        ════════════════════════════════════════════════════
+        Áp dụng đúng cấu trúc chuẩn đoán 5 phần dưới đây.
+        
+        *LƯU Ý THÔNG MINH:* - Hãy kiểm tra Lịch sử chat. Nếu User ĐÃ cung cấp đủ thông tin (Vị trí đau, thời gian, mức độ, tiền sử...), thì ở phần "Hỏi thêm" hãy nói: "Dựa trên thông tin cậu kể, mình đã nắm khá rõ tình hình." và không cần đặt câu hỏi nữa.
+        - Nếu thiếu thông tin, hãy đặt 2-3 câu hỏi quan trọng nhất.
+
+        BẮT BUỘC SỬ DỤNG ĐỊNH DẠNG MARKDOWN SAU CHO MODE 2:
+
+        (Lời dẫn dắt cảm thông, ân cần)
 
         ### 🔍 Phân tích sơ bộ:
-        (Phân tích các triệu chứng người dùng vừa kể)
+        (Phân tích kỹ các triệu chứng user kể, kết hợp với dữ liệu RAG)
 
         ### 🩺 Để hiểu rõ hơn, cậu cho mình hỏi thêm nhé:
-        (Đặt các câu hỏi thông minh để thu hẹp phạm vi chẩn đoán)
+        (Nếu thiếu tin: Đặt câu hỏi / Nếu đủ tin: Ghi "Thông tin đã khá đầy đủ để chẩn đoán.")
 
         ### 💡 Có thể cậu đang gặp vấn đề về:
-        (Nêu các giả thuyết bệnh lý dựa trên kiến thức)
+        (Đưa ra các giả thuyết bệnh lý, xếp theo thứ tự khả năng cao nhất)
 
         ### 👉 Chuyên khoa cậu nên ghé khám:
-        **[TÊN CHUYÊN KHOA]** - (Lý do vì sao chọn khoa này)
+        **[TÊN CHUYÊN KHOA]** - (Giải thích ngắn gọn tại sao)
 
         ### 📝 Lưu ý cho cậu:
-        (Dặn dò chăm sóc sức khỏe)
+        - **Chăm sóc:** (Lời khuyên ăn uống, nghỉ ngơi)
+        - **Thuốc men:** (Gợi ý nhóm thuốc không kê đơn nếu an toàn)
+        - **Cảnh báo:** (Dấu hiệu nguy hiểm cần đi cấp cứu ngay)
 
-        (Câu chốt tình cảm)
+        (Lời chúc sức khỏe cuối cùng)
         """
+        
+        # 4. GỌI AI
         response = llm.invoke(prompt)
+        
+        # Xử lý kết quả trả về
         content = response.content
         final_ans = ""
         if isinstance(content, list):
@@ -241,10 +280,23 @@ def get_bot_response(user_query, history):
                 elif isinstance(item, dict) and 'text' in item: final_ans += item['text']
         else:
             final_ans = str(content)
-        return final_ans + citation_text
-    except Exception as e: return f"❌ Lỗi: {e}"
+            
+        # 5. BỘ LỌC HIỂN THỊ NGUỒN (LOGIC CHUẨN XÁC)
+        # ------------------------------------------------------------------
+        # Điều kiện hiển thị nguồn:
+        # 1. Has Source: Phải tìm thấy nguồn thực tế trong kho (Sau khi đã lọc score ở bước 2, len(sources) > 0)
+        # 2. Is Diagnosis: Phải là bài tư vấn bệnh (Có chứa dấu hiệu chẩn đoán "###")
+        
+        has_sources = len(sources) > 0
+        is_diagnosis = "###" in final_ans
+        
+        if has_sources and is_diagnosis:
+            return final_ans + citation_text
+        else:
+            return final_ans # Xã giao hoặc không tìm thấy nguồn (do bị lọc hết) -> Không hiện
 
-# --- PHẦN CÒN LẠI GIỮ NGUYÊN ---
+    except Exception as e: return f"❌ Lỗi xử lý: {e}"
+
 # (Session state, Sidebar, và Main Content)
 
 # --- SESSION STATE ---
@@ -345,10 +397,16 @@ with st.sidebar:
                     if ok: st.success("Xong!")
                     else: st.error(msg)
 
-# ==========================================
-# 🚀 8. MAIN CONTENT (GIAO DIỆN CHÍNH)
-# ==========================================
-st.title("🏥 Người Bạn Bác Sĩ (AI)")
+# =========================================================
+# 8. MAIN CONTENT (GIAO DIỆN CHAT)
+# =========================================================
+st.title("🏥 Health Chatbot")
+
+# Cảnh báo y tế
+st.warning("⚠️ **Lưu ý:** AI chỉ hỗ trợ tư vấn sơ bộ, không thay thế chẩn đoán của bác sĩ chuyên khoa. Trong trường hợp khẩn cấp, hãy đến cơ sở y tế gần nhất.", icon="⚠️")
+
+AVATAR_AI = "https://cdn-icons-png.flaticon.com/512/3774/3774299.png"
+AVATAR_USER = "https://cdn-icons-png.flaticon.com/512/1144/1144760.png"
 
 messages = []
 if st.session_state.user_info:
@@ -357,28 +415,60 @@ if st.session_state.user_info:
 else:
     messages = st.session_state.guest_messages
 
+# Màn hình chào
 if not messages:
-    st.markdown("👋 *Chào bạn! Có chỗ nào trong người thấy không ổn à? Kể mình nghe xem nào.*")
+    st.markdown("""
+    <div style='text-align: center; color: #666; margin-bottom: 20px;'>
+        <h3>👋 Xin chào! Mình có thể giúp gì cho sức khỏe của bạn?</h3>
+        <p><i>Hãy kể cho mình nghe về triệu chứng, hoặc hỏi về thuốc men...</i></p>
+    </div>
+    """, unsafe_allow_html=True)
 
+# Hiển thị lịch sử chat
 for msg in messages:
-    st.chat_message(msg["role"]).write(msg["content"])
+    role = msg["role"]
+    avatar = AVATAR_USER if role == "user" else AVATAR_AI
+    with st.chat_message(role, avatar=avatar):
+        st.write(msg["content"])
 
-if prompt := st.chat_input("Kể triệu chứng cho mình nghe..."):
-    st.chat_message("user").write(prompt)
-    with st.chat_message("assistant"):
-        with st.spinner("👨‍⚕️ Đang ngẫm nghĩ xíu..."):
-            history_str = "\n".join([f"{m['role']}: {m['content']}" for m in messages[-4:]])
-            response = get_bot_response(prompt, history_str)
-            st.write(response)
+# --- XỬ LÝ NHẬP LIỆU (QUAN TRỌNG: ĐÃ SỬA LỖI RERUN) ---
+if prompt := st.chat_input("Gõ triệu chứng vào đây..."):
+    # 1. Hiện câu hỏi User ngay lập tức
+    with st.chat_message("user", avatar=AVATAR_USER):
+        st.write(prompt)
     
+    # 2. Bot suy nghĩ và trả lời
+    full_response = ""
+    with st.chat_message("assistant", avatar=AVATAR_AI):
+        with st.spinner("👨‍⚕️ Bác sĩ đang suy nghĩ..."):
+            history_str = "\n".join([f"{m['role']}: {m['content']}" for m in messages[-4:]])
+            full_response = get_bot_response(prompt, history_str)
+            st.write(full_response)
+    
+    # 3. Lưu vào Database (Xử lý ngầm)
     if st.session_state.user_info:
         uid = st.session_state.user_info['id']
+        
+        # TRƯỜNG HỢP: CUỘC TRÒ CHUYỆN MỚI
         if st.session_state.current_conv_id is None:
             title = (prompt[:30] + '..') if len(prompt) > 30 else prompt
             new_id = database.create_conversation(uid, title)
             st.session_state.current_conv_id = new_id
-        database.save_message(st.session_state.current_conv_id, "user", prompt)
-        database.save_message(st.session_state.current_conv_id, "assistant", response)
+            
+            # Lưu tin nhắn đầu tiên
+            database.save_message(new_id, "user", prompt)
+            database.save_message(new_id, "assistant", full_response)
+            
+            # CHỈ RERUN KHI TẠO MỚI (Để cập nhật tên bên Sidebar)
+            st.rerun()
+            
+        # TRƯỜNG HỢP: ĐANG CHAT TIẾP (KHÔNG RERUN)
+        else:
+            database.save_message(st.session_state.current_conv_id, "user", prompt)
+            database.save_message(st.session_state.current_conv_id, "assistant", full_response)
+            # Lưu xong thì thôi, KHÔNG gọi st.rerun() nữa -> Tin nhắn sẽ giữ nguyên trên màn hình
+            
     else:
+        # Chế độ khách
         st.session_state.guest_messages.append({"role": "user", "content": prompt})
-        st.session_state.guest_messages.append({"role": "assistant", "content": response})
+        st.session_state.guest_messages.append({"role": "assistant", "content": full_response})
