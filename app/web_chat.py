@@ -6,28 +6,26 @@ except ImportError:
     pass
 
 # =========================================================
-# 📚 2. CÁC THƯ VIỆN CẦN THIẾT
+# 📚 CÁC THƯ VIỆN CẦN THIẾT
 # =========================================================
 import streamlit as st
 import streamlit.components.v1 as components 
 import os
 import sys
-import zipfile
 import time
 
 # --- CẤU HÌNH ĐƯỜNG DẪN ĐỂ IMPORT FILE ---
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings 
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.vectorstores import Chroma
 from src import config, database 
+# IMPORT LOGIC TỪ FILE SERVICE MỚI
+from src.services import ai_service
 
 load_dotenv()
 
 # =========================================================
-# ⚙️ 3. CẤU HÌNH TRANG
+# ⚙️ CẤU HÌNH TRANG
 # =========================================================
 st.set_page_config(
     page_title="Health Chatbot", 
@@ -43,7 +41,7 @@ if "GOOGLE_API_KEY" in st.secrets:
 # ---------------------------------------------------
 
 # =========================================================
-# BẢO VỆ GIAO DIỆN KHÔNG ẢNH HƯỞNG DO Google Translate CỦA WEB ẢNH HƯỞNG
+# BẢO VỆ GIAO DIỆN (Anti-Google Translate)
 # =========================================================
 components.html("""
 <script>
@@ -62,7 +60,7 @@ components.html("""
         const inputs = window.parent.document.querySelectorAll('input, textarea, button, select');
         inputs.forEach(addProtection);
         
-        // CẬP NHẬT MỚI: Bảo vệ bong bóng chat và nội dung chat
+        // Bảo vệ bong bóng chat và nội dung chat
         const chatMessages = window.parent.document.querySelectorAll('[data-testid="stChatMessage"]');
         chatMessages.forEach(addProtection);
         
@@ -76,7 +74,7 @@ components.html("""
 """, height=0)
 
 # =========================================================
-# 🎨 5. CSS GIAO DIỆN
+# 🎨 CSS GIAO DIỆN
 # =========================================================
 st.markdown("""
 <style>
@@ -143,170 +141,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 🧠 6. KHỞI TẠO LOGIC
+# 🧠 KHỞI TẠO STATE
 # =========================================================
-@st.cache_resource
-def load_resources():
-    db_path = os.path.join(config.CHROMA_DB_DIR, "chroma.sqlite3")
-    
-    zip_path = db_path + ".zip"
-    if not os.path.exists(zip_path):
-        zip_path_double = db_path + ".zip.zip"
-        if os.path.exists(zip_path_double):
-            zip_path = zip_path_double
-
-    if not os.path.exists(db_path) and os.path.exists(zip_path):
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(config.CHROMA_DB_DIR)
-        except Exception as e:
-            st.error(f"Lỗi giải nén: {e}")
-
-    # --- TẢI DATABASE & AI ---
-    vector_db = None
-    if os.path.exists(config.CHROMA_DB_DIR):
-        try:
-            embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", model_kwargs={'device': 'cpu'})
-            vector_db = Chroma(persist_directory=config.CHROMA_DB_DIR, embedding_function=embedding_model)
-        except Exception as e:
-            pass
-    
-    llm = None
-    if config.GOOGLE_API_KEY:
-        llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.3, google_api_key=config.GOOGLE_API_KEY)
-        
-    return vector_db, llm
-
-vector_db, llm = load_resources()
-
-
-
-
-# --- HÀM XỬ LÝ TRẢ LỜI ---
-def get_bot_response(user_query, history):
-    # 1. Kiểm tra kết nối
-    if not vector_db or not llm: return "⚠️ Hệ thống đang bảo trì (Chưa kết nối Database/AI)."
-    
-    try:
-        # 2. RAG - TÌM KIẾM CÓ CHỌN LỌC (LỌC ĐỘ CHÍNH XÁC)
-        # ---------------------------------------------------------
-        # Thay vì chỉ tìm kiếm, ta lấy thêm cả điểm số (Score) để biết độ giống
-        # ChromaDB Score: 0 là giống hệt. Càng lớn là càng khác.
-        results = vector_db.similarity_search_with_score(user_query, k=4)
-        
-        docs = []
-        # THRESHOLD (NGƯỠNG LỌC): 
-        # Chỉ lấy tài liệu có điểm < 1.2 (Con số này đảm bảo chỉ lấy tài liệu thực sự liên quan)
-        for doc, score in results:
-            if score < 1.2: 
-                docs.append(doc)
-                
-        sources = []
-        context = ""
-        citation_text = ""
-        
-        # Chỉ khi sau khi lọc mà vẫn còn tài liệu thì mới tạo list nguồn
-        if docs:
-            for doc in docs:
-                src = doc.metadata.get("source", "Tài liệu y khoa")
-                if src not in sources: sources.append(src)
-            context = "\n".join([d.page_content for d in docs])
-            citation_text = "\n\n---\n**📚 Tài liệu tham khảo:**\n" + "\n".join([f"- {s}" for s in sources])
-        else:
-            # Nếu lọc xong không còn gì (VD: Hỏi thất tình, hỏi xã giao) -> Dùng kiến thức chung
-            context = "Không có dữ liệu cụ thể trong kho, dùng kiến thức y khoa tổng quát."
-            citation_text = "" # Chuỗi này rỗng để tí nữa bộ lọc ở bước 5 bắt được
-        
-        # 3. PROMPT ENGINEERING (GIỮ NGUYÊN CẤU TRÚC ĐẦY ĐỦ NHƯ BẠN YÊU CẦU)
-        # ---------------------------------------------------------
-        prompt = f"""
-        VAI TRÒ: Bạn là "Người Bạn Bác Sĩ" (Health Chatbot) - Giỏi chuyên môn nhưng nói chuyện ân cần như bạn thân (Xưng hô: Mình - Bạn/Cậu).
-
-        DỮ LIỆU ĐẦU VÀO:
-        - Lịch sử chat: {history}
-        - Kiến thức Y khoa (RAG): {context}
-        - User vừa nói: "{user_query}"
-
-        NHIỆM VỤ: HÃY XÁC ĐỊNH Ý ĐỊNH CỦA USER ĐỂ CHỌN 1 TRONG 2 CHẾ ĐỘ TRẢ LỜI:
-
-        ════════════════════════════════════════════════════
-        MODE 1: XÃ GIAO / CẢM XÚC (Khi User chào, cảm ơn, khen, chê, tạm biệt)
-        ════════════════════════════════════════════════════
-        - Nếu User nói "Hello", "Hi", "Chào": Trả lời vui vẻ, ngắn gọn, hỏi thăm sức khỏe.
-        - Nếu User nói "Cảm ơn", "Hay quá", "Ok": Đáp lại lịch sự (VD: "Không có chi, chúc bạn mau khỏe nhé!").
-        - QUY TẮC CỨNG: KHÔNG được dùng cấu trúc khám bệnh (###) trong trường hợp này.
-
-        ════════════════════════════════════════════════════
-        MODE 2: TƯ VẤN Y KHOA (Khi User kể bệnh, hỏi thuốc, lo lắng)
-        ════════════════════════════════════════════════════
-        Áp dụng đúng cấu trúc chuẩn đoán 5 phần dưới đây.
-        
-        *LƯU Ý THÔNG MINH:* - Hãy kiểm tra Lịch sử chat. Nếu User ĐÃ cung cấp đủ thông tin (Vị trí đau, thời gian, mức độ, tiền sử...), thì ở phần "Hỏi thêm" hãy nói: "Dựa trên thông tin cậu kể, mình đã nắm khá rõ tình hình." và không cần đặt câu hỏi nữa.
-        - Nếu thiếu thông tin, hãy đặt 2-3 câu hỏi quan trọng nhất.
-
-        BẮT BUỘC SỬ DỤNG ĐỊNH DẠNG MARKDOWN SAU CHO MODE 2:
-
-        (Lời dẫn dắt cảm thông, ân cần)
-
-        ### 🔍 Phân tích sơ bộ:
-        (Phân tích kỹ các triệu chứng user kể, kết hợp với dữ liệu RAG)
-
-        ### 🩺 Để hiểu rõ hơn, cậu cho mình hỏi thêm nhé:
-        (Nếu thiếu tin: Đặt câu hỏi / Nếu đủ tin: Ghi "Thông tin đã khá đầy đủ để chẩn đoán.")
-
-        ### 💡 Có thể cậu đang gặp vấn đề về:
-        (Đưa ra các giả thuyết bệnh lý, xếp theo thứ tự khả năng cao nhất)
-
-        ### 👉 Chuyên khoa cậu nên ghé khám:
-        **[TÊN CHUYÊN KHOA]** - (Giải thích ngắn gọn tại sao)
-
-        ### 📝 Lưu ý cho cậu:
-        - **Chăm sóc:** (Lời khuyên ăn uống, nghỉ ngơi)
-        - **Thuốc men:** (Gợi ý nhóm thuốc không kê đơn nếu an toàn)
-        - **Cảnh báo:** (Dấu hiệu nguy hiểm cần đi cấp cứu ngay)
-
-        (Lời chúc sức khỏe cuối cùng)
-        """
-        
-        # 4. GỌI AI
-        response = llm.invoke(prompt)
-        
-        # Xử lý kết quả trả về
-        content = response.content
-        final_ans = ""
-        if isinstance(content, list):
-            for item in content:
-                if isinstance(item, str): final_ans += item
-                elif isinstance(item, dict) and 'text' in item: final_ans += item['text']
-        else:
-            final_ans = str(content)
-            
-        # 5. BỘ LỌC HIỂN THỊ NGUỒN (LOGIC CHUẨN XÁC)
-        # ------------------------------------------------------------------
-        # Điều kiện hiển thị nguồn:
-        # 1. Has Source: Phải tìm thấy nguồn thực tế trong kho (Sau khi đã lọc score ở bước 2, len(sources) > 0)
-        # 2. Is Diagnosis: Phải là bài tư vấn bệnh (Có chứa dấu hiệu chẩn đoán "###")
-        
-        has_sources = len(sources) > 0
-        is_diagnosis = "###" in final_ans
-        
-        if has_sources and is_diagnosis:
-            return final_ans + citation_text
-        else:
-            return final_ans # Xã giao hoặc không tìm thấy nguồn (do bị lọc hết) -> Không hiện
-
-    except Exception as e: return f"❌ Lỗi xử lý: {e}"
-
-# (Session state, Sidebar, và Main Content)
-
-# --- SESSION STATE ---
 if "user_info" not in st.session_state: st.session_state.user_info = None 
 if "current_conv_id" not in st.session_state: st.session_state.current_conv_id = None
 if "guest_messages" not in st.session_state: st.session_state.guest_messages = [] 
 if "delete_confirm_id" not in st.session_state: st.session_state.delete_confirm_id = None
 
 # ==========================================
-# 🛑 7. SIDEBAR
+# 🛑 SIDEBAR
 # ==========================================
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3774/3774299.png", width=70)
@@ -398,7 +241,7 @@ with st.sidebar:
                     else: st.error(msg)
 
 # =========================================================
-# 8. MAIN CONTENT (GIAO DIỆN CHAT)
+# MAIN CONTENT (GIAO DIỆN CHAT)
 # =========================================================
 st.title("🏥 Health Chatbot")
 
@@ -431,18 +274,21 @@ for msg in messages:
     with st.chat_message(role, avatar=avatar):
         st.write(msg["content"])
 
-# --- XỬ LÝ NHẬP LIỆU (QUAN TRỌNG: ĐÃ SỬA LỖI RERUN) ---
+# --- XỬ LÝ NHẬP LIỆU ---
 if prompt := st.chat_input("Gõ triệu chứng vào đây..."):
     # 1. Hiện câu hỏi User ngay lập tức
     with st.chat_message("user", avatar=AVATAR_USER):
         st.write(prompt)
     
-    # 2. Bot suy nghĩ và trả lời
+    # 2. Bot suy nghĩ và trả lời (GỌI QUA AI SERVICE)
     full_response = ""
     with st.chat_message("assistant", avatar=AVATAR_AI):
         with st.spinner("👨‍⚕️ Bác sĩ đang suy nghĩ..."):
             history_str = "\n".join([f"{m['role']}: {m['content']}" for m in messages[-4:]])
-            full_response = get_bot_response(prompt, history_str)
+            
+            # GỌI HÀM TỪ FILE SERVICE (Đã tách logic)
+            full_response = ai_service.get_bot_response(prompt, history_str)
+            
             st.write(full_response)
     
     # 3. Lưu vào Database (Xử lý ngầm)
@@ -466,7 +312,7 @@ if prompt := st.chat_input("Gõ triệu chứng vào đây..."):
         else:
             database.save_message(st.session_state.current_conv_id, "user", prompt)
             database.save_message(st.session_state.current_conv_id, "assistant", full_response)
-            # Lưu xong thì thôi, KHÔNG gọi st.rerun() nữa -> Tin nhắn sẽ giữ nguyên trên màn hình
+            # Lưu xong thì thôi, KHÔNG gọi st.rerun() nữa
             
     else:
         # Chế độ khách
