@@ -1,8 +1,8 @@
 import os
 import zipfile
 import sys
+import google.generativeai as genai  # Dùng thư viện gốc để xử lý ảnh tốt hơn
 from langchain_huggingface import HuggingFaceEmbeddings 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.vectorstores import Chroma
 # Import config để lấy biến môi trường, tên model
 from src import config
@@ -19,7 +19,15 @@ def load_resources():
     if _vector_db is not None and _llm is not None:
         return _vector_db, _llm
 
-    # 1. Xử lý giải nén DB
+    # 1. Cấu hình API Key cho Google GenAI
+    api_key = os.environ.get("GOOGLE_API_KEY") or config.GOOGLE_API_KEY
+    if not api_key:
+        print("❌ Lỗi: Không tìm thấy Google API Key.")
+        return None, None
+        
+    genai.configure(api_key=api_key)
+
+    # 2. Xử lý giải nén DB
     db_path = os.path.join(config.CHROMA_DB_DIR, "chroma.sqlite3")
     zip_path = db_path + ".zip"
     
@@ -36,90 +44,92 @@ def load_resources():
         except Exception as e:
             print(f"Lỗi giải nén: {e}")
 
-    # 2. Load Vector DB
+    # 3. Load Vector DB
     if os.path.exists(config.CHROMA_DB_DIR):
         try:
-            #Lấy tên model embedding từ config
+            # Lấy tên model embedding từ config
             embedding_model = HuggingFaceEmbeddings(
                 model_name=config.EMBEDDING_MODEL, 
-                model_kwargs={'device': 'cpu'}
+                model_kwargs={'device': 'cpu'},
+                encode_kwargs={'normalize_embeddings': False} # Fix lỗi dimension
             )
             _vector_db = Chroma(persist_directory=config.CHROMA_DB_DIR, embedding_function=embedding_model)
         except Exception as e:
             print(f"Lỗi load ChromaDB: {e}")
     
-    # 3. Load LLM (Gemini)
-    # Ưu tiên lấy từ biến môi trường hệ thống (Streamlit Cloud), nếu không có thì lấy từ file .env qua config
-    api_key = os.environ.get("GOOGLE_API_KEY") or config.GOOGLE_API_KEY
-    
-    if api_key:
-        # CẬP NHẬT: Lấy tên model chat từ config
-        _llm = ChatGoogleGenerativeAI(
-            model=config.CHAT_MODEL, 
-            temperature=0.3, 
-            google_api_key=api_key
-        )
+    # 4. Load LLM (Gemini Native)
+    # Dùng thư viện gốc để hỗ trợ Multimodal (Text + Image) dễ dàng
+    try:
+        _llm = genai.GenerativeModel(config.CHAT_MODEL)
+    except Exception as e:
+        print(f"Lỗi khởi tạo Gemini: {e}")
         
     return _vector_db, _llm
 
-def get_bot_response(user_query, history):
-    """Hàm xử lý logic RAG và Prompt Engineering"""
+def get_bot_response(user_query, history, image=None):
+    """
+    Hàm xử lý logic RAG và Prompt Engineering.
+    Thêm tham số: image (Mặc định là None)
+    """
     vector_db, llm = load_resources()
     
     # 1. Kiểm tra kết nối
-    if not vector_db or not llm: 
+    if not llm: 
         return "⚠️ Hệ thống đang bảo trì (Chưa kết nối Database/AI hoặc sai API Key)."
     
     try:
         # 2. RAG - Tìm kiếm dữ liệu y khoa
-        docs = vector_db.similarity_search(user_query, k=4)
-        sources = []
+        # (Vẫn tìm kiếm văn bản để lấy kiến thức nền, kể cả khi có ảnh)
         context = ""
         citation_text = ""
-        
-        # Chỉ khi tìm thấy tài liệu thì mới tạo list nguồn
-        if docs:
-            for doc in docs:
-                src = doc.metadata.get("source", "Tài liệu y khoa")
-                if src not in sources: sources.append(src)
-            context = "\n".join([d.page_content for d in docs])
-            citation_text = "\n\n---\n**📚 Tài liệu tham khảo:**\n" + "\n".join([f"- {s}" for s in sources])
+        sources = []
+
+        if vector_db:
+            docs = vector_db.similarity_search(user_query, k=4)
+            if docs:
+                for doc in docs:
+                    src = doc.metadata.get("source", "Tài liệu y khoa")
+                    if src not in sources: sources.append(src)
+                context = "\n".join([d.page_content for d in docs])
+                citation_text = "\n\n---\n**📚 Tài liệu tham khảo:**\n" + "\n".join([f"- {s}" for s in sources])
+            else:
+                context = "Không có dữ liệu cụ thể trong kho, dùng kiến thức y khoa tổng quát."
         else:
-            context = "Không có dữ liệu cụ thể trong kho, dùng kiến thức y khoa tổng quát."
-            citation_text = "" # Không có nguồn thì chuỗi rỗng
+            context = "Chế độ không có Database (Chỉ dùng kiến thức của AI)."
         
-        # 3. PROMPT ENGINEERING
-        prompt = f"""
+        # 3. PROMPT ENGINEERING (Điều chỉnh nhẹ để nhận diện ảnh)
+        system_instruction = f"""
         VAI TRÒ: Bạn là "Người Bạn Bác Sĩ" (Health Chatbot) - Giỏi chuyên môn nhưng nói chuyện ân cần như bạn thân (Xưng hô: Mình - Bạn/Cậu).
 
         DỮ LIỆU ĐẦU VÀO:
         - Lịch sử chat: {history}
-        - Kiến thức Y khoa (RAG): {context}
+        - Kiến thức Y khoa tham khảo (RAG): {context}
         - User vừa nói: "{user_query}"
+        {'- ⚠️ LƯU Ý: USER CÓ GỬI KÈM MỘT HÌNH ẢNH. HÃY QUAN SÁT KỸ ẢNH ĐỂ CHẨN ĐOÁN.' if image else ''}
 
         NHIỆM VỤ: HÃY XÁC ĐỊNH Ý ĐỊNH CỦA USER ĐỂ CHỌN 1 TRONG 2 CHẾ ĐỘ TRẢ LỜI:
 
         ════════════════════════════════════════════════════
         MODE 1: XÃ GIAO / CẢM XÚC (Khi User chào, cảm ơn, khen, chê, tạm biệt)
         ════════════════════════════════════════════════════
-        - Nếu User nói "Hello", "Hi", "Chào": Trả lời vui vẻ, ngắn gọn, hỏi thăm sức khỏe.
-        - Nếu User nói "Cảm ơn", "Hay quá", "Ok": Đáp lại lịch sự (VD: "Không có chi, chúc bạn mau khỏe nhé!").
+        - Nếu User nói "Hello", "Hi", "Chào": Trả lời vui vẻ, ngắn gọn.
+        - Nếu User nói "Cảm ơn": Đáp lại lịch sự.
         - QUY TẮC CỨNG: KHÔNG được dùng cấu trúc khám bệnh (###) trong trường hợp này.
 
         ════════════════════════════════════════════════════
-        MODE 2: TƯ VẤN Y KHOA (Khi User kể bệnh, hỏi thuốc, lo lắng)
+        MODE 2: TƯ VẤN Y KHOA (Khi User kể bệnh, hỏi thuốc, lo lắng HOẶC GỬI ẢNH)
         ════════════════════════════════════════════════════
         Áp dụng đúng cấu trúc chuẩn đoán 5 phần dưới đây.
         
-        *LƯU Ý THÔNG MINH:* - Hãy kiểm tra Lịch sử chat. Nếu User ĐÃ cung cấp đủ thông tin (Vị trí đau, thời gian, mức độ, tiền sử...), thì ở phần "Hỏi thêm" hãy nói: "Dựa trên thông tin cậu kể, mình đã nắm khá rõ tình hình." và không cần đặt câu hỏi nữa.
-        - Nếu thiếu thông tin, hãy đặt 2-3 câu hỏi quan trọng nhất.
+        *LƯU Ý QUAN TRỌNG:* - Nếu có ảnh: Hãy mô tả những gì bạn thấy trong ảnh (sưng, đỏ, mủ, toa thuốc...) ở phần Phân tích sơ bộ.
+        - Nếu User ĐÃ cung cấp đủ thông tin (Vị trí đau, thời gian, mức độ...), phần "Hỏi thêm" hãy nói: "Dựa trên thông tin và hình ảnh cậu gửi, mình đã nắm khá rõ tình hình."
 
         BẮT BUỘC SỬ DỤNG ĐỊNH DẠNG MARKDOWN SAU CHO MODE 2:
 
         (Lời dẫn dắt cảm thông, ân cần)
 
         ### 🔍 Phân tích sơ bộ:
-        (Phân tích kỹ các triệu chứng user kể, kết hợp với dữ liệu RAG)
+        (Phân tích kỹ các triệu chứng user kể VÀ chi tiết hình ảnh nếu có, kết hợp với dữ liệu RAG)
 
         ### 🩺 Để hiểu rõ hơn, cậu cho mình hỏi thêm nhé:
         (Nếu thiếu tin: Đặt câu hỏi / Nếu đủ tin: Ghi "Thông tin đã khá đầy đủ để chẩn đoán.")
@@ -138,30 +148,27 @@ def get_bot_response(user_query, history):
         (Lời chúc sức khỏe cuối cùng)
         """
         
-        # 4. GỌI AI
-        response = llm.invoke(prompt)
-        
-        # Xử lý kết quả trả về
-        content = response.content
-        final_ans = ""
-        if isinstance(content, list):
-            for item in content:
-                if isinstance(item, str): final_ans += item
-                elif isinstance(item, dict) and 'text' in item: final_ans += item['text']
-        else:
-            final_ans = str(content)
+        # 4. GỌI AI (XỬ LÝ ĐA PHƯƠNG THỨC)
+        try:
+            if image:
+                # Nếu có ảnh, gửi cả prompt lẫn ảnh vào list
+                response = llm.generate_content([system_instruction, image])
+            else:
+                # Nếu chỉ có text
+                response = llm.generate_content(system_instruction)
             
+            final_ans = response.text
+
+        except Exception as e:
+            return f"❌ Lỗi khi gọi Gemini: {str(e)}"
+
         # 5. BỘ LỌC THÔNG MINH
-        # Điều kiện hiển thị nguồn:
-        # 1. Has Source: Phải tìm thấy nguồn thực tế trong kho (len(sources) > 0)
-        # 2. Is Diagnosis: Phải là bài tư vấn bệnh (Có chứa dấu hiệu chẩn đoán "###")
-        
         has_sources = len(sources) > 0
         is_diagnosis = "###" in final_ans
         
         if has_sources and is_diagnosis:
             return final_ans + citation_text
         else:
-            return final_ans # Xã giao hoặc không tìm thấy nguồn -> Không hiện
+            return final_ans 
 
-    except Exception as e: return f"❌ Lỗi xử lý: {e}"
+    except Exception as e: return f"❌ Lỗi xử lý hệ thống: {e}"
