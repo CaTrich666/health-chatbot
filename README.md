@@ -1,5 +1,7 @@
 # 🏥 Health Chatbot AI
 
+link trang web: https://health-chatbot-tranhuutai.streamlit.app/
+
 Dự án Chatbot tư vấn sức khỏe thông minh sử dụng kiến trúc **Hybrid Multimodal RAG**.
 
 Hệ thống được xây dựng dựa trên 3 trụ cột công nghệ chính:
@@ -37,7 +39,7 @@ HEALTH_CHATBOT/
 │   ├── build_db.py           # Tool nạp dữ liệu vào Vector DB
 │   └── check_models.py       # Tool kiểm tra trạng thái API Key
 │
-├── src/                      # ⚙️ LOGIC XỬ LÝ
+├── src/                      # LOGIC XỬ LÝ
 │   ├── services/
 │   │   ├── __init__.py
 │   │   └── ai_service.py     # Xử lý AI
