@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- 1. CẤU HÌNH API KEY ---
-# Lấy từ biến môi trường.
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # --- 2. CẤU HÌNH ĐƯỜNG DẪN ---
@@ -14,7 +13,10 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
 
 # Tên thư mục chứa Database
-CHROMA_DB_DIR = os.path.join(DATA_DIR, "chroma_db_diagnosis") 
+CHROMA_DB_DIR = os.path.join(DATA_DIR, "chroma_db_diagnosis")
+
+# Tên thư mục chứa file BM25:
+BM25_INDEX_PATH = os.path.join(DATA_DIR, "bm25_index.pkl")
 
 # --- 3. ĐƯỜNG DẪN FILE DỮ LIỆU ---
 PATH_MEDQUAD = os.path.join(RAW_DATA_DIR, "medquad.csv")
@@ -22,4 +24,11 @@ PATH_SYMPTOM = os.path.join(RAW_DATA_DIR, "train.jsonl")
 
 # --- 4. CẤU HÌNH MODEL ---
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHAT_MODEL = "gemini-flash-latest"
+CHAT_MODEL = "gemini-2.0-flash-lite"
+
+# --- 5. CẤU HÌNH BM25 + RRF (MỚI) ---
+BM25_K1 = 1.5        # độ nhạy với tần suất từ (cao hơn = ưu tiên từ xuất hiện nhiều)
+BM25_B  = 0.75       # chuẩn hóa độ dài văn bản (0=không chuẩn hóa, 1=chuẩn hóa hoàn toàn)
+RRF_K   = 60         # hằng số RRF, càng nhỏ càng ưu tiên top rank
+TOP_K_RETRIEVAL = 5  # số doc lấy từ mỗi luồng trước khi fuse
+TOP_K_FINAL     = 3  # số doc cuối cùng đưa vào prompt sau khi fuse

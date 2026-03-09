@@ -5,21 +5,15 @@ try:
 except ImportError:
     pass
 
-# =========================================================
-# 📚 CÁC THƯ VIỆN CẦN THIẾT
-# =========================================================
 import streamlit as st
-import streamlit.components.v1 as components 
+import streamlit.components.v1 as components
 import os
 import sys
-import time
-from PIL import Image 
 
-# --- CẤU HÌNH ĐƯỜNG DẪN ---
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
-from src import config, database 
+from src import config, database
 from src.services import ai_service
 
 load_dotenv()
@@ -28,389 +22,470 @@ load_dotenv()
 # ⚙️ CẤU HÌNH TRANG
 # =========================================================
 st.set_page_config(
-    page_title="Health Chatbot", 
-    page_icon="🏥", 
-    layout="wide", 
-    initial_sidebar_state="expanded" 
+    page_title="Health AI",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# --- CẬP NHẬT KEY ---
 if "GOOGLE_API_KEY" in st.secrets:
     os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
     config.GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 
-# --- KEY QUẢN LÝ UPLOAD ẢNH ---
-if "uploader_key" not in st.session_state:
-    st.session_state.uploader_key = 0
+# =========================================================
+# 🧠 KHỞI TẠO STATE
+# =========================================================
+def init_session_state():
+    if "user_info" not in st.session_state:
+        st.session_state.user_info = None
+    if "current_conv_id" not in st.session_state:
+        st.session_state.current_conv_id = None
+    if "guest_messages" not in st.session_state:
+        st.session_state.guest_messages = []
+    if "delete_confirm_id" not in st.session_state:
+        st.session_state.delete_confirm_id = None
+
+init_session_state()
 
 # =========================================================
-# 🛡️ 1. VACXIN CHỐNG DỊCH (LOẠI BỎ HOÀN TOÀN LỖI REMOVECHILD)
+# 🛡️ CHỐNG DỊCH
 # =========================================================
-# Script này chèn thẻ meta cấm dịch và gán thuộc tính cấm dịch cho toàn bộ HTML
 components.html("""
 <script>
-    function injectAntiTranslate() {
-        // 1. Chèn thẻ Meta cấm dịch vào HEAD (Cấp độ cao nhất của trình duyệt)
+    function antiTranslate() {
         const head = window.parent.document.head;
         if (!head.querySelector('meta[name="google"][content="notranslate"]')) {
-            const meta = window.parent.document.createElement('meta');
-            meta.name = "google";
-            meta.content = "notranslate";
-            head.appendChild(meta);
+            const m = window.parent.document.createElement('meta');
+            m.name = "google"; m.content = "notranslate";
+            head.appendChild(m);
         }
-
-        // 2. Khóa dịch ở thẻ HTML và BODY
-        const html = window.parent.document.documentElement;
-        html.setAttribute('translate', 'no');
-        html.classList.add('notranslate');
-
-        const body = window.parent.document.body;
-        body.setAttribute('translate', 'no');
-        body.classList.add('notranslate');
-
-        // 3. Khóa dịch cụ thể Sidebar (Mục tiêu chính)
-        const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
-        if (sidebar) {
-            sidebar.setAttribute('translate', 'no');
-            sidebar.classList.add('notranslate');
-        }
+        window.parent.document.documentElement.setAttribute('translate', 'no');
+        window.parent.document.documentElement.classList.add('notranslate');
     }
-    
-    // Chạy ngay lập tức
-    injectAntiTranslate();
-    
-    // Chạy liên tục mỗi 300ms để đảm bảo trình duyệt không tự bật lại
-    setInterval(injectAntiTranslate, 300);
+    antiTranslate();
 </script>
 """, height=0)
 
 # =========================================================
-# 🎨 2. CSS GIAO DIỆN & NÚT BẤM
+# 🎨 CSS
 # =========================================================
 st.markdown("""
 <style>
-    /* Font chữ */
-    html, body, [class*="css"] { font-family: 'Source Sans Pro', sans-serif; font-size: 16px; }
+    @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=Google+Sans+Display:wght@400;500&display=swap');
 
-    /* Sidebar */
-    section[data-testid="stSidebar"] { padding-top: 1rem; border-right: 1px solid #e0e0e0; }
-    
-    /* Khung chat chính */
-    .main .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 120px; 
-        max-width: 900px;
-        margin: 0 auto;
+    html, body, [class*="css"] {
+        font-family: 'Google Sans', 'Segoe UI', sans-serif;
+        font-size: 14.5px;
+        color: #1f1f1f;
     }
-
-    /* FIX LỖI THANH NHẬP LIỆU BỊ RỘNG */
-    .stChatInput {
-        max-width: 900px !important;
-        margin: 0 auto !important;
-        position: fixed;
-        bottom: 30px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 99;
-    }
-    
-    .stChatInput textarea {
-        padding-left: 50px !important; 
-    }
-
-    /* --- NÚT KẸP GIẤY --- */
-    /* Mặc định ẩn tất cả các nút popover để tránh hiện sai chỗ */
-    [data-testid="stPopover"] {
-        display: none; 
-    }
-
-    /* Riêng nút trong Sidebar thì PHẢI hiện (để bấm menu lịch sử) */
-    [data-testid="stSidebar"] [data-testid="stPopover"] {
-        display: inline-flex !important;
-    }
-
-    /* Style riêng cho nút Upload sau khi được JS tìm thấy và gắn class */
-    .my-upload-btn {
-        display: block !important;
-        position: fixed !important;
-        z-index: 100000 !important;
-        width: 40px !important;
-        height: 40px !important;
-    }
-
-    .my-upload-btn > button {
-        background-color: transparent !important;
-        border: none !important;
-        color: #555 !important;
-        border-radius: 50% !important;
-        width: 100% !important;
-        height: 100% !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        transition: all 0.2s !important;
-        box-shadow: none !important;
-    }
-
-    .my-upload-btn > button:hover {
-        background-color: #f0f2f6 !important;
-        color: #ff4b4b !important;
-    }
-    
-    .my-upload-btn > button::after {
-        content: "📎";
-        font-size: 24px;
-        font-weight: bold;
-    }
-    .my-upload-btn > button > div { display: none !important; }
 
     #MainMenu, footer, .stDeployButton, [data-testid="InputInstructions"] { display: none !important; }
+
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        border-bottom: none !important;
+        box-shadow: none !important;
+        height: 2.5rem !important;
+    }
+    [data-testid="collapsedControl"] {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        z-index: 999999 !important;
+        background-color: transparent !important;
+    }
+
+    .stApp { background-color: #f8f9fa; }
+
+    section[data-testid="stSidebar"] {
+        background-color: #f0f4f9 !important;
+        border-right: 1px solid #e3e8f0 !important;
+    }
+    [data-testid="stSidebarContent"] {
+        padding: 0 !important;
+        overflow: hidden !important;
+    }
+    [data-testid="stSidebarUserContent"] {
+        padding: 2.5rem 0 0 0 !important;
+        height: 100vh !important;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box !important;
+    }
+    [data-testid="stSidebarUserContent"] > div {
+        display: flex;
+        flex-direction: column;
+        height: 100% !important;
+        position: relative;
+    }
+
+    .sidebar-logo {
+        display: flex; align-items: center; gap: 8px;
+        padding: 0 10px 5px 10px;
+        font-family: 'Google Sans Display', sans-serif;
+        font-size: 17px; font-weight: 500; color: #1a73e8;
+    }
+    .sidebar-logo img { border-radius: 50%; width: 28px; }
+
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background-color: #e8f0fe !important;
+        color: #1a73e8 !important;
+        border: none !important;
+        border-radius: 24px !important;
+        font-weight: 500 !important;
+        padding: 0.4rem 1rem !important;
+        margin-top: 5px;
+    }
+
+    hr { margin: 0.8rem 0 !important; border-color: #dde3ec !important; }
+
+    [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"]:has(.history-marker) {
+        height: calc(100vh - 140px) !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 4px 0 0 !important;
+        margin-bottom: 0 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"]:has(.history-marker) > div {
+        height: 100% !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"]:has(.history-marker) .stButton > button {
+        background-color: transparent !important;
+        color: #3c4043 !important;
+        border: none !important;
+        text-align: left !important;
+        padding: 4px 8px !important;
+        justify-content: flex-start !important;
+    }
+
+    [data-testid="element-container"]:has(.logout-zone) {
+        position: absolute;
+        bottom: 0; left: 0; width: 100%;
+    }
+    .logout-zone {
+        padding: 10px 0 10px 0;
+        border-top: 1px solid #dde3ec;
+        background: #f0f4f9;
+    }
+
+    [data-testid="stSidebar"]:has(.guest-mode-marker) [data-testid="stSidebarUserContent"] > div {
+        overflow-y: auto !important;
+        padding-bottom: 2rem !important;
+    }
+    [data-testid="stSidebar"]:has(.guest-mode-marker) .stTextInput input {
+        padding: 0.4rem 0.8rem !important;
+        min-height: 38px !important;
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #c4cdd6; border-radius: 4px; }
+
+    .main .block-container {
+        padding-top: 3rem;
+        padding-bottom: 120px;
+        max-width: 800px;
+    }
+    [data-testid="stChatMessage"] { background: transparent !important; border: none !important; box-shadow: none !important; }
+    .stChatMessage:has([data-testid="chatAvatarIcon-user"]) .stMarkdown {
+        background-color: #e8f0fe !important;
+        border-radius: 18px 18px 4px 18px !important;
+        padding: 0.6rem 1rem !important;
+        display: inline-block !important;
+    }
+    [data-testid="chatAvatarIcon-user"] img, [data-testid="chatAvatarIcon-assistant"] img {
+        border-radius: 50% !important;
+        border: 1px solid #e8eaed !important;
+    }
+
+    .stBottom { background: linear-gradient(to top, #f8f9fa 80%, transparent) !important; padding-bottom: 25px !important; }
+    .stChatInput { max-width: 800px !important; margin: 0 auto !important; }
+    .stChatInput > div {
+        background: #ffffff !important;
+        border: 1px solid #e3e8f0 !important;
+        border-radius: 28px !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05) !important;
+        padding: 5px 5px 5px 15px !important;
+    }
+    .stChatInput > div:focus-within { border-color: #1a73e8 !important; }
+    .stChatInput [data-baseweb], .stChatInput textarea {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    .stChatInput textarea { font-family: 'Google Sans', sans-serif !important; }
+    .stChatInput button {
+        background: #1a73e8 !important;
+        border-radius: 50% !important;
+        width: 42px !important;
+        height: 42px !important;
+        margin: 0 !important;
+    }
+
+    .welcome-card {
+        background: linear-gradient(135deg, #e8f0fe 0%, #eef6ff 100%);
+        border-radius: 20px; padding: 2.5rem 2rem; text-align: center;
+        border: 1px solid #d2e3fc; margin-bottom: 2rem;
+    }
+    .welcome-card h3 { color: #1a73e8; font-weight: 500; font-family: 'Google Sans Display', sans-serif; }
+    .chips-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 1rem; }
+    .chip { background: #fff; border: 1px solid #dadce0; border-radius: 20px; padding: 6px 14px; font-size: 13px; }
+
+    /* ══════════════════════════════════════
+       LOADING INDICATOR - HIỆU ỨNG ĐANG PHÂN TÍCH
+    ══════════════════════════════════════ */
+    .thinking-bubble {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        background: #ffffff;
+        border: 1px solid #e3e8f0;
+        border-radius: 18px 18px 18px 4px;
+        padding: 10px 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        font-size: 13.5px;
+        color: #5f6368;
+        margin-top: 2px;
+    }
+    /* Vòng xoay CSS thuần */
+    .thinking-spinner {
+        width: 16px;
+        height: 16px;
+        border: 2.5px solid #e3e8f0;
+        border-top-color: #1a73e8;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        flex-shrink: 0;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    /* Ba chấm nhảy */
+    .dots span {
+        display: inline-block;
+        width: 5px; height: 5px;
+        margin: 0 2px;
+        background: #1a73e8;
+        border-radius: 50%;
+        animation: bounce 1.2s infinite ease-in-out;
+    }
+    .dots span:nth-child(1) { animation-delay: 0s; }
+    .dots span:nth-child(2) { animation-delay: 0.2s; }
+    .dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+        0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+        40%            { transform: translateY(-5px); opacity: 1; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# =========================================================
-# 🛠️ 3. JS THÔNG MINH: CHỌN ĐÚNG NÚT UPLOAD (KHÔNG NHẦM VỚI SIDEBAR)
-# =========================================================
-js_code = """
-<script>
-function alignButton() {
-    try {
-        const chatInput = window.parent.document.querySelector('.stChatInput');
-        
-        // 1. Lấy TẤT CẢ các nút Popover trên màn hình
-        const allPopovers = window.parent.document.querySelectorAll('[data-testid="stPopover"]');
-        let targetPopover = null;
-
-        // 2. Duyệt qua từng nút để tìm đúng nút Upload (Nút KHÔNG nằm trong Sidebar)
-        for (let i = 0; i < allPopovers.length; i++) {
-            const p = allPopovers[i];
-            // Kiểm tra: Nút này có tổ tiên là Sidebar không?
-            const insideSidebar = p.closest('[data-testid="stSidebar"]');
-            
-            // Nếu KHÔNG nằm trong sidebar, thì đây chính là nút Upload chúng ta cần
-            if (!insideSidebar) {
-                targetPopover = p;
-                break; // Tìm thấy rồi thì dừng lại, không cần tìm tiếp
-            }
-        }
-        
-        // 3. Nếu tìm thấy đúng nút và thanh chat
-        if (chatInput && targetPopover) {
-            // Đánh dấu class để CSS hiển thị nó lên (biến nó thành nút kẹp giấy)
-            if (!targetPopover.classList.contains('my-upload-btn')) {
-                targetPopover.classList.add('my-upload-btn');
-            }
-
-            const rect = chatInput.getBoundingClientRect();
-            
-            // Nếu thanh nhập liệu chưa hiện thì ẩn nút đi
-            if (rect.width === 0) {
-                targetPopover.style.display = 'none';
-                return;
-            }
-
-            // Tính toán vị trí
-            const targetLeft = rect.left + 5;
-            const targetBottom = (window.parent.innerHeight - rect.bottom) + 15; 
-            
-            // Gán vị trí
-            targetPopover.style.left = targetLeft + 'px';
-            targetPopover.style.bottom = targetBottom + 'px';
-            targetPopover.style.display = 'block'; // Hiện nút lên
-        }
-    } catch(e) {}
-}
-setInterval(alignButton, 50);
-</script>
-"""
-components.html(js_code, height=0)
 
 # =========================================================
-# 🧠 KHỞI TẠO STATE
+# 🗂️ RENDER SIDEBAR LOGIC
 # =========================================================
-if "user_info" not in st.session_state: st.session_state.user_info = None 
-if "current_conv_id" not in st.session_state: st.session_state.current_conv_id = None
-if "guest_messages" not in st.session_state: st.session_state.guest_messages = [] 
-if "delete_confirm_id" not in st.session_state: st.session_state.delete_confirm_id = None
+def render_sidebar():
+    with st.sidebar:
+        st.markdown("""
+        <div class="sidebar-logo">
+            <img src="https://cdn-icons-png.flaticon.com/512/3774/3774299.png" width="32">
+            Health AI
+        </div>
+        """, unsafe_allow_html=True)
 
-# ==========================================
-# 🛑 SIDEBAR
-# ==========================================
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3774/3774299.png", width=70)
-    
-    # Placeholder để reset nội dung sạch sẽ (Giúp tránh lỗi DOM cũ còn sót lại)
-    sidebar_placeholder = st.empty()
-
-    with sidebar_placeholder.container():
         if st.session_state.user_info:
+            st.markdown('<div class="logged-in-state"></div>', unsafe_allow_html=True)
             user = st.session_state.user_info
-            st.success(f"👋 Hi, {user['full_name']}")
-            
-            if st.button("➕ Tạo đoạn chat mới", use_container_width=True):
+
+            st.markdown(f"👋 Xin chào, **{user['full_name']}**")
+            if st.button("✦ Chat mới", use_container_width=True, type="primary"):
                 st.session_state.current_conv_id = None
                 st.rerun()
-                
-            st.divider()
-            st.write("📂 **Lịch sử:**")
-            
-            convs = database.get_user_conversations(user['id'])
-            if not convs: st.caption("Trống.")
-            
-            for conv in convs:
-                col1, col2 = st.columns([0.85, 0.15]) 
-                with col1:
-                    if st.session_state.delete_confirm_id == conv['id']:
-                        st.caption("⚠️ Xóa nhé?")
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button("Có", key=f"yes_{conv['id']}", type="primary", use_container_width=True):
-                                database.delete_conversation(conv['id'])
-                                st.session_state.delete_confirm_id = None
-                                if st.session_state.current_conv_id == conv['id']:
-                                    st.session_state.current_conv_id = None
-                                st.rerun()
-                        with c2:
-                            if st.button("Hủy", key=f"no_{conv['id']}", use_container_width=True):
-                                st.session_state.delete_confirm_id = None
-                                st.rerun()
-                    else:
-                        icon = "📌 " if conv.get('is_pinned', 0) else "💬 "
-                        label = f"{icon}{conv['title'][:18]}..."
-                        if st.button(label, key=f"btn_{conv['id']}", use_container_width=True):
-                            st.session_state.current_conv_id = conv['id']
-                            st.rerun()
-                
-                with col2:
-                    if st.session_state.delete_confirm_id != conv['id']:
-                        with st.popover("⋮", use_container_width=True):
-                            is_pinned = conv.get('is_pinned', 0)
-                            pin_label = "Bỏ ghim" if is_pinned else "Ghim"
-                            if st.button(pin_label, key=f"pin_{conv['id']}", use_container_width=True):
-                                database.toggle_pin_conversation(conv['id'], is_pinned)
-                                st.rerun()
-                            if st.button("Xóa", key=f"trig_del_{conv['id']}", use_container_width=True):
-                                st.session_state.delete_confirm_id = conv['id']
-                                st.rerun()
 
             st.divider()
-            if st.button("🚪 Đăng Xuất"):
-                st.session_state.user_info = None
+            st.caption("📂 LỊCH SỬ GẦN ĐÂY")
+
+            with st.container(height=280):
+                st.markdown('<div class="history-marker"></div>', unsafe_allow_html=True)
+
+                convs = database.get_user_conversations(user['id'])
+                if not convs:
+                    st.caption("Chưa có lịch sử.")
+                else:
+                    for conv in convs:
+                        c1, c2 = st.columns([0.8, 0.2])
+                        with c1:
+                            if st.session_state.delete_confirm_id == conv['id']:
+                                st.error("Xóa?", icon="⚠️")
+                                d1, d2 = st.columns(2)
+                                if d1.button("Có", key=f"y_{conv['id']}", use_container_width=True):
+                                    database.delete_conversation(conv['id'])
+                                    st.session_state.delete_confirm_id = None
+                                    if st.session_state.current_conv_id == conv['id']:
+                                        st.session_state.current_conv_id = None
+                                    st.rerun()
+                                if d2.button("Ko", key=f"n_{conv['id']}", use_container_width=True):
+                                    st.session_state.delete_confirm_id = None
+                                    st.rerun()
+                            else:
+                                icon  = "📌 " if conv.get('is_pinned', 0) else "💬 "
+                                title = conv['title'][:20] + "..." if len(conv['title']) > 20 else conv['title']
+                                if st.button(f"{icon}{title}", key=f"btn_{conv['id']}", use_container_width=True):
+                                    st.session_state.current_conv_id = conv['id']
+                                    st.rerun()
+                        with c2:
+                            if st.session_state.delete_confirm_id != conv['id']:
+                                with st.popover("⋮"):
+                                    is_pinned = conv.get('is_pinned', 0)
+                                    if st.button("Bỏ ghim" if is_pinned else "📌 Ghim", key=f"pin_{conv['id']}", use_container_width=True):
+                                        database.toggle_pin_conversation(conv['id'], is_pinned)
+                                        st.rerun()
+                                    if st.button("🗑️ Xóa", key=f"del_{conv['id']}", use_container_width=True):
+                                        st.session_state.delete_confirm_id = conv['id']
+                                        st.rerun()
+
+            st.markdown('<div class="logout-zone">', unsafe_allow_html=True)
+            if st.button("🚪 Đăng Xuất", use_container_width=True):
+                st.session_state.user_info     = None
                 st.session_state.current_conv_id = None
-                st.session_state.guest_messages = []
+                st.session_state.guest_messages  = []
                 st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
         else:
-            st.info("Chế độ: **Khách**")
-            st.caption("Chat với Bác sĩ AI.")
+            st.markdown('<div class="guest-mode-marker"></div>', unsafe_allow_html=True)
+            st.info("🙂 Đang dùng chế độ Khách\n\nĐăng nhập để lưu lịch sử.")
             st.divider()
-            
-            mode = st.radio("Tài khoản:", ["Đăng Nhập", "Đăng Ký"], horizontal=True)
-            
+
+            mode = st.radio("Chế độ xác thực", ["Đăng Nhập", "Đăng Ký"], horizontal=True, label_visibility="collapsed")
+
             if mode == "Đăng Nhập":
                 with st.form("login_form"):
-                    u = st.text_input("User")
-                    p = st.text_input("Pass", type="password")
-                    if st.form_submit_button("Vào chat", use_container_width=True):
-                        user = database.login_user(u, p)
-                        if user:
-                            st.session_state.user_info = user
+                    u = st.text_input("Tài khoản", placeholder="Nhập username...")
+                    p = st.text_input("Mật khẩu", type="password", placeholder="Nhập mật khẩu...")
+                    if st.form_submit_button("Đăng nhập", use_container_width=True):
+                        usr = database.login_user(u, p)
+                        if usr:
+                            st.session_state.user_info = usr
                             st.rerun()
-                        else: st.error("Sai rồi!")
-            else: 
+                        else:
+                            st.error("Sai tên đăng nhập hoặc mật khẩu.")
+            else:
                 with st.form("reg_form"):
-                    nu = st.text_input("User Mới")
-                    np = st.text_input("Pass Mới", type="password")
-                    nn = st.text_input("Họ Tên")
-                    if st.form_submit_button("Đăng ký", use_container_width=True):
+                    nu = st.text_input("Tài khoản mới", placeholder="Chọn username...")
+                    np = st.text_input("Mật khẩu", type="password", placeholder="Tạo mật khẩu...")
+                    nn = st.text_input("Họ và tên", placeholder="Tên đầy đủ của bạn...")
+                    if st.form_submit_button("Tạo tài khoản", use_container_width=True):
                         ok, msg = database.register_user(nu, np, nn)
-                        if ok: 
-                            st.success("Xong!")
-                        else: 
+                        if ok:
+                            st.success("✅ Thành công! Hãy đăng nhập.")
+                        else:
                             st.error(msg)
 
+
 # =========================================================
-# MAIN CONTENT (GIAO DIỆN CHAT)
+# 💬 RENDER KHU VỰC CHAT CHÍNH
 # =========================================================
-st.title("🏥 Health Chatbot")
-st.warning("⚠️ **Lưu ý:** AI chỉ hỗ trợ tư vấn sơ bộ, không thay thế chẩn đoán của bác sĩ chuyên khoa.", icon="⚠️")
+def render_chat():
+    st.title("Health AI ✦")
+    st.warning("**Lưu ý:** Tư vấn sơ bộ từ AI, không thay thế chẩn đoán của bác sĩ.", icon="⚠️")
 
-AVATAR_AI = "https://cdn-icons-png.flaticon.com/512/3774/3774299.png"
-AVATAR_USER = "https://cdn-icons-png.flaticon.com/512/1144/1144760.png"
+    AVATAR_AI   = "https://cdn-icons-png.flaticon.com/512/3774/3774299.png"
+    AVATAR_USER = "https://cdn-icons-png.flaticon.com/512/1144/1144760.png"
 
-messages = []
-if st.session_state.user_info:
-    if st.session_state.current_conv_id:
-        messages = database.load_messages(st.session_state.current_conv_id)
-else:
-    messages = st.session_state.guest_messages
-
-if not messages:
-    st.markdown("""
-    <div style='text-align: center; color: #666; margin-bottom: 20px;'>
-        <h3>👋 Xin chào! Mình có thể giúp gì cho sức khỏe của bạn?</h3>
-    </div>
-    """, unsafe_allow_html=True)
-
-for msg in messages:
-    role = msg["role"]
-    avatar = AVATAR_USER if role == "user" else AVATAR_AI
-    with st.chat_message(role, avatar=avatar):
-        st.write(msg["content"])
-
-# ==========================================
-# 📸 KHU VỰC NHẬP LIỆU
-# ==========================================
-
-image_input = None
-upload_key = f"file_uploader_{st.session_state.uploader_key}"
-
-# --- NÚT ĐÍNH KÈM (ĐÂY LÀ NÚT Ở MAIN CONTENT - SẼ ĐƯỢC JS CHỌN VÀ GẮN CSS) ---
-with st.popover(" ", use_container_width=False):
-    st.markdown("### 📸 Tải ảnh triệu chứng")
-    uploaded_file = st.file_uploader(
-        "Chọn ảnh:", 
-        type=["jpg", "jpeg", "png"], 
-        label_visibility="collapsed",
-        key=upload_key
-    )
-    if uploaded_file is not None:
-        image_input = Image.open(uploaded_file)
-        st.image(image_input, width=200, caption="Đã chọn")
-        st.success("Ảnh đã sẵn sàng! Gõ tin nhắn để gửi.")
-
-# --- XỬ LÝ CHAT ---
-if prompt := st.chat_input("Gõ triệu chứng vào đây..."):
-    with st.chat_message("user", avatar=AVATAR_USER):
-        st.write(prompt)
-        if image_input: st.image(image_input, width=250)
-    
-    full_response = ""
-    with st.chat_message("assistant", avatar=AVATAR_AI):
-        with st.spinner("👨‍⚕️ Bác sĩ đang xem xét..."):
-            history_str = "\n".join([f"{m['role']}: {m['content']}" for m in messages[-4:]])
-            full_response = ai_service.get_bot_response(prompt, history_str, image=image_input)
-            st.write(full_response)
-    
-    prompt_to_save = prompt
-    if image_input: prompt_to_save += " \n\n[Người dùng đã gửi kèm một hình ảnh]"
-
+    # Load tin nhắn
+    messages = []
     if st.session_state.user_info:
-        uid = st.session_state.user_info['id']
-        if st.session_state.current_conv_id is None:
-            title = (prompt[:30] + '..') if len(prompt) > 30 else prompt
-            new_id = database.create_conversation(uid, title)
-            st.session_state.current_conv_id = new_id
-            database.save_message(new_id, "user", prompt_to_save)
-            database.save_message(new_id, "assistant", full_response)
-            st.session_state.uploader_key += 1
-            st.rerun()
-        else:
-            database.save_message(st.session_state.current_conv_id, "user", prompt_to_save)
-            database.save_message(st.session_state.current_conv_id, "assistant", full_response)
-            st.session_state.uploader_key += 1
-            # KHÔNG RERUN ĐỂ TRÁNH LỖI MÀN HÌNH TRẮNG
+        if st.session_state.current_conv_id:
+            messages = database.load_messages(st.session_state.current_conv_id)
     else:
-        st.session_state.guest_messages.append({"role": "user", "content": prompt_to_save})
-        st.session_state.guest_messages.append({"role": "assistant", "content": full_response})
-        st.session_state.uploader_key += 1
-        st.rerun()
+        messages = st.session_state.guest_messages
+
+    # Box Welcome
+    if not messages:
+        st.markdown("""
+        <div class="welcome-card">
+            <h3>Xin chào! Tôi có thể giúp gì cho sức khỏe của bạn?</h3>
+            <p>Mô tả triệu chứng, đặt câu hỏi hoặc tìm hiểu về y tế.</p>
+            <div class="chips-row">
+                <span class="chip">🤒 Bị sốt cao</span>
+                <span class="chip">💊 Thuốc hạ sốt</span>
+                <span class="chip">🫁 Ho kéo dài</span>
+                <span class="chip">😴 Mất ngủ</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Hiển thị lịch sử chat
+    for msg in messages:
+        role   = msg["role"]
+        avatar = AVATAR_USER if role == "user" else AVATAR_AI
+        with st.chat_message(role, avatar=avatar):
+            st.write(msg["content"])
+
+    # ─── Xử lý input ───
+    if prompt := st.chat_input("Hỏi về sức khỏe của bạn..."):
+
+        # Hiển thị tin nhắn người dùng ngay lập tức
+        with st.chat_message("user", avatar=AVATAR_USER):
+            st.write(prompt)
+
+        with st.chat_message("assistant", avatar=AVATAR_AI):
+            history_str = "\n".join([f"{m['role']}: {m['content']}" for m in messages[-4:]])
+
+            # ══════════════════════════════════════════════════════
+            # [FIX CHÍNH] BƯỚC 1: Hiện loading bubble TRƯỚC
+            # rồi chạy RAG (phần nặng nhất) bên trong spinner.
+            # Spinner kết thúc → chữ bắt đầu stream ngay lập tức.
+            # ══════════════════════════════════════════════════════
+
+            # Placeholder để thay loading → stream text
+            response_placeholder = st.empty()
+
+            # Hiện bubble "đang phân tích" ngay lập tức
+            response_placeholder.markdown("""
+            <div class="thinking-bubble">
+                <div class="thinking-spinner"></div>
+                <span>Đang tra cứu tài liệu y khoa…</span>
+                <span class="dots">
+                    <span></span><span></span><span></span>
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Chạy RAG đồng bộ (bước chậm) - người dùng nhìn thấy bubble ở trên
+            context, citation_text = ai_service._get_rag_context(prompt)
+            built_prompt = ai_service._build_prompt(prompt, history_str, context)
+
+            # Xoá bubble loading, thay bằng stream text
+            response_placeholder.empty()
+
+            # BƯỚC 2: Stream từ Gemini (chữ hiện dần ngay từ token đầu tiên)
+            full_response = st.write_stream(
+                ai_service.stream_from_built_prompt(built_prompt, citation_text)
+            )
+
+        # ── Lưu DB ──
+        if st.session_state.user_info:
+            uid = st.session_state.user_info['id']
+            if st.session_state.current_conv_id is None:
+                title  = prompt[:30] + '..' if len(prompt) > 30 else prompt
+                new_id = database.create_conversation(uid, title)
+                st.session_state.current_conv_id = new_id
+                database.save_message(new_id, "user",      prompt)
+                database.save_message(new_id, "assistant", full_response)
+                st.rerun()
+            else:
+                database.save_message(st.session_state.current_conv_id, "user",      prompt)
+                database.save_message(st.session_state.current_conv_id, "assistant", full_response)
+        else:
+            st.session_state.guest_messages.append({"role": "user",      "content": prompt})
+            st.session_state.guest_messages.append({"role": "assistant", "content": full_response})
+
+
+# =========================================================
+# 🚀 KHỞI CHẠY ỨNG DỤNG
+# =========================================================
+render_sidebar()
+render_chat()
