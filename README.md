@@ -4,19 +4,22 @@ link trang web: https://health-chatbot-tranhuutai.streamlit.app/
 
 Dự án Chatbot tư vấn sức khỏe thông minh sử dụng kiến trúc **Hybrid RAG**.
 
-Hệ thống được xây dựng dựa trên 3 trụ cột công nghệ chính:
+## Kiến trúc Hệ thống (3 Trụ cột Công nghệ)
 
-1.  **Native Multimodal LLM (Đa phương thức):**
-    * Sử dụng mô hình **Google Gemini 1.5 Flash** (`gemini-flash-latest`).
-    * Hệ thống có thể xử lý **Văn bản** của người dùng.
+Hệ thống được thiết kế theo kiến trúc RAG, xây dựng dựa trên 3 trụ cột công nghệ cốt lõi nhằm đảm bảo tốc độ, độ chính xác và tính an toàn trong y tế:
 
-2.  **Hybrid Search (Tìm kiếm Lai):**
-    * **Vector Search (Đã hoàn thiện):** Sử dụng **ChromaDB** để tìm kiếm theo ý nghĩa câu hỏi (giúp AI hiểu được các mô tả triệu chứng, kể cả khi người dùng không dùng từ chuyên môn).
-    * **Keyword Search & Fusion (Đã hoàn thiện):** Tích hợp thuật toán BM25 để bắt chính xác các danh từ riêng (tên thuốc, tên bệnh đặc thù). Hai luồng kết quả Vector và BM25 được gộp lại bằng thuật toán RRF (Reciprocal Rank Fusion) để cung cấp ngữ cảnh chính xác tuyệt đối cho AI.
+### 1. High-Performance LLM (Mô hình Ngôn ngữ Lớn Tốc độ cao)
+   * **Động cơ cốt lõi:** Sử dụng mô hình **Llama 3.3 70B Versatile** (`llama-3.3-70b-versatile`) thông qua nền tảng phần cứng LPU của **Groq API**. Sự kết hợp này mang lại khả năng suy luận logic xuất sắc và tốc độ sinh văn bản siêu tốc (gần như tức thì).
+   * **Xử lý Ngôn ngữ Tự nhiên:** Hệ thống tập trung xử lý văn bản tiếng Việt để thấu hiểu chính xác tình trạng, triệu chứng bệnh mà người dùng mô tả thông qua ngôn ngữ đời thường.
 
-3.  **Safety & Grounding (Kiểm soát Ảo giác):**
-    * **Knowledge Base:** Chỉ sử dụng dữ liệu y văn uy tín (MedQuad) đã được kiểm chứng làm nguồn tham khảo.
-    * **Robust Prompt Engineering:** Sử dụng kỹ thuật "Ra lệnh nghiêm ngặt" (Strict Prompting). Ép buộc AI chỉ được trả lời dựa trên dữ liệu được cung cấp, tuyệt đối không tự suy diễn hay bịa đặt thông tin y tế.
+### 2. Hybrid Search (Truy xuất Thông tin Lai nâng cao)
+   * **Vector Search (Tìm kiếm Ngữ nghĩa):** Sử dụng cơ sở dữ liệu **ChromaDB** để tìm kiếm theo ý nghĩa câu hỏi. Khắc phục điểm yếu của tìm kiếm truyền thống, giúp AI hiểu được triệu chứng kể cả khi người dùng không dùng từ chuyên môn y khoa.
+   * **Keyword Search (Tìm kiếm Từ khóa):** Tích hợp thuật toán **BM25** kết hợp cùng bộ xử lý NLP Tiếng Việt (`underthesea`) để bắt chính xác các danh từ riêng, "từ khóa cứng" (tên thuốc, tên hội chứng đặc thù).
+   * **RRF Fusion:** Hai luồng kết quả độc lập (Vector và BM25) được gộp lại và xếp hạng chéo bằng thuật toán **Reciprocal Rank Fusion (RRF)**. Điều này giúp cung cấp đoạn ngữ cảnh (Context) tối ưu và chính xác tuyệt đối cho AI trước khi sinh câu trả lời.
+
+### 3. Medical Triage & Safety (Sàng lọc An toàn & Kiểm soát Ảo giác)
+   * **Knowledge Base & Grounding:** Chỉ sử dụng dữ liệu y văn uy tín (MedQuad) đã được kiểm chứng làm nền tảng tham khảo. Thông số sáng tạo của AI được khóa chặt (`temperature = 0.2`) để triệt tiêu hoàn toàn rủi ro bịa đặt thông tin y tế.
+   * **Robust Prompt Engineering:** Sử dụng kỹ thuật "Ra lệnh nghiêm ngặt" (Strict Prompting) theo hướng **Sàng lọc chuyên khoa**. Ép buộc AI chỉ được trả lời dựa trên dữ liệu cung cấp, **tuyệt đối không tự ý chẩn đoán hay kê đơn thuốc**, mà chỉ tập trung phân tích triệu chứng và hướng dẫn người dùng đi khám đúng chuyên khoa phù hợp.
 
 ## 📂 Cấu Trúc Dự Án
 
