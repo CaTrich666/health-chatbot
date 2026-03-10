@@ -19,7 +19,7 @@ Hệ thống được thiết kế theo kiến trúc RAG, xây dựng dựa trê
 
 ### 3. Medical Triage & Safety (Sàng lọc An toàn & Kiểm soát Ảo giác)
    * **Knowledge Base & Grounding:** Chỉ sử dụng dữ liệu y văn uy tín (MedQuad) đã được kiểm chứng làm nền tảng tham khảo. Thông số sáng tạo của AI được khóa chặt (`temperature = 0.2`) để triệt tiêu hoàn toàn rủi ro bịa đặt thông tin y tế.
-   * **Robust Prompt Engineering:** Sử dụng kỹ thuật "Ra lệnh nghiêm ngặt" (Strict Prompting) theo hướng **Sàng lọc chuyên khoa**. Ép buộc AI chỉ được trả lời dựa trên dữ liệu cung cấp, **tuyệt đối không tự ý chẩn đoán hay kê đơn thuốc**, mà chỉ tập trung phân tích triệu chứng và hướng dẫn người dùng đi khám đúng chuyên khoa phù hợp.
+   * **Advanced Prompt Engineering:** Áp dụng kỹ thuật phân luồng đa kịch bản (Adaptive Routing) và tự kiểm duyệt ngầm (Self-Consistency) theo hướng **Sàng lọc chuyên khoa**. Ép buộc AI đánh giá dựa trên ngưỡng thông tin nghiêm ngặt và nhận diện dấu hiệu cấp cứu (Red Flags). Hệ thống **tuyệt đối không tự ý chẩn đoán hay kê đơn thuốc**, chỉ tập trung phân tích triệu chứng để điều hướng người bệnh đến đúng chuyên khoa một cách an toàn nhất.
 
 ## 📂 Cấu Trúc Dự Án
 
