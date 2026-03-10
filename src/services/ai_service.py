@@ -6,7 +6,8 @@ import streamlit as st
 from typing import Generator, Optional, Tuple, List
 from collections import defaultdict
 
-import google.generativeai as genai
+# 👇 [CẬP NHẬT] Import Groq thay vì genai
+from groq import Groq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from src import config
@@ -43,7 +44,7 @@ def _extract_db_if_needed():
 
 
 # ═══════════════════════════════════════════════════════════
-# THROTTLE - TRÁNH GỌI GEMINI QUÁ NHANH
+# THROTTLE - TRÁNH GỌI QUÁ NHANH (Giữ nguyên cho an toàn)
 # ═══════════════════════════════════════════════════════════
 _last_gemini_call: float = 0.0
 _MIN_INTERVAL_SEC: float = 2.0
@@ -58,8 +59,6 @@ def _throttle_gemini():
 
 # ═══════════════════════════════════════════════════════════
 # CACHE TÀI NGUYÊN - CHỈ CHẠY 1 LẦN DUY NHẤT
-# Trả về (vector_db, llm, bm25_index, bm25_docs)
-# bm25_docs: list[Document] song song với BM25 index (từ file .pkl)
 # ═══════════════════════════════════════════════════════════
 @st.cache_resource(show_spinner=False)
 def load_resources() -> Tuple[Optional[object], Optional[object], Optional[object], Optional[list]]:
@@ -68,28 +67,20 @@ def load_resources() -> Tuple[Optional[object], Optional[object], Optional[objec
 
     _extract_db_if_needed()
 
-    # Gemini LLM
-    api_key = os.environ.get("GOOGLE_API_KEY") or config.GOOGLE_API_KEY
+    # 👇 [CẬP NHẬT] Khởi tạo Groq LLM thay vì Gemini
+    api_key = os.environ.get("GROQ_API_KEY") or getattr(config, "GROQ_API_KEY", None)
     if not api_key:
-        print("❌ Lỗi: Không tìm thấy Google API Key.")
+        print("❌ Lỗi: Không tìm thấy GROQ_API_KEY.")
         return None, None, None, None
 
-    genai.configure(api_key=api_key)
     llm = None
     try:
-        llm = genai.GenerativeModel(
-            model_name=config.CHAT_MODEL,
-            generation_config=genai.GenerationConfig(
-                temperature=0.2,
-                max_output_tokens=1024,
-                top_p=0.9,
-            )
-        )
-        print("✅ Đã khởi tạo Gemini LLM")
+        llm = Groq(api_key=api_key)
+        print("✅ Đã khởi tạo Groq LLM")
     except Exception as e:
-        print(f"❌ Lỗi khởi tạo Gemini: {e}")
+        print(f"❌ Lỗi khởi tạo Groq: {e}")
 
-    # Vector DB
+    # Vector DB (Giữ nguyên)
     vector_db = None
     if os.path.exists(config.CHROMA_DB_DIR):
         try:
@@ -106,10 +97,7 @@ def load_resources() -> Tuple[Optional[object], Optional[object], Optional[objec
         except Exception as e:
             print(f"❌ Lỗi load ChromaDB: {e}")
 
-    # ─────────────────────────────────────────────────────
-    # Load BM25 từ file .pkl (do ingest script tạo sẵn)
-    # KHÔNG tự build lại từ ChromaDB nữa → nhanh hơn, tách biệt rõ ràng
-    # ─────────────────────────────────────────────────────
+    # Load BM25 từ file .pkl (Giữ nguyên)
     bm25_index = None
     bm25_docs  = None
     if os.path.exists(config.BM25_INDEX_PATH):
@@ -131,7 +119,6 @@ def load_resources() -> Tuple[Optional[object], Optional[object], Optional[objec
 # BM25 SEARCH - load từ .pkl, tokenize bằng underthesea
 # ═══════════════════════════════════════════════════════════
 def _bm25_search(query: str, k: int = None) -> List[Tuple[str, str, float]]:
-    """Tìm kiếm keyword bằng BM25. Trả về list[(content, source, score)]."""
     if k is None:
         k = config.TOP_K_RETRIEVAL
 
@@ -140,7 +127,6 @@ def _bm25_search(query: str, k: int = None) -> List[Tuple[str, str, float]]:
         return []
 
     try:
-        # Dùng _tokenize() thay vì .split() → xử lý đúng tiếng Việt
         tokenized_query = _tokenize(query)
         scores      = bm25_index.get_scores(tokenized_query)
         top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
@@ -166,7 +152,6 @@ def _rrf_fusion(
     bm25_results:   List[Tuple[str, str, float]],
     k:              int = None,
 ) -> List[Tuple[str, str]]:
-    """Gộp 2 luồng bằng Reciprocal Rank Fusion. Trả về top-k list[(content, source)]."""
     if k is None:
         k = config.TOP_K_FINAL
 
@@ -187,11 +172,9 @@ def _rrf_fusion(
 
 
 # ═══════════════════════════════════════════════════════════
-# CACHE VECTOR SEARCH - dùng session_state thay @st.cache_data
-# để tránh nested cache với @st.cache_resource
+# CACHE VECTOR SEARCH
 # ═══════════════════════════════════════════════════════════
 def _cached_similarity_search(query: str, k: int = None) -> tuple:
-    """Vector search có cache bằng session_state."""
     if k is None:
         k = config.TOP_K_RETRIEVAL
 
@@ -219,8 +202,6 @@ def _cached_similarity_search(query: str, k: int = None) -> tuple:
 # RAG CONTEXT - Vector + BM25 + RRF
 # ═══════════════════════════════════════════════════════════
 def _get_rag_context(user_query: str) -> Tuple[str, str]:
-    """Lấy context bằng cách fuse Vector Search + BM25 qua RRF."""
-
     vector_results = list(_cached_similarity_search(user_query, k=config.TOP_K_RETRIEVAL))
     bm25_results   = _bm25_search(user_query, k=config.TOP_K_RETRIEVAL)
 
@@ -232,7 +213,6 @@ def _get_rag_context(user_query: str) -> Tuple[str, str]:
         _, _, bm25_index, _ = load_resources()
         if bm25_index is None:
             print("⚠️ BM25 index chưa được load, dùng vector search thuần")
-        # Nếu bm25_index có nhưng không có kết quả (query ngắn, chào hỏi...) → im lặng, đây là bình thường
 
     if not fused_results:
         return "Không có dữ liệu cụ thể, dùng kiến thức y khoa tổng quát.", ""
@@ -257,37 +237,48 @@ def _get_rag_context(user_query: str) -> Tuple[str, str]:
 
 
 # ═══════════════════════════════════════════════════════════
-# BUILD PROMPT
+# BUILD PROMPT (👇 ĐÃ CẬP NHẬT THÀNH "TRỢ LÝ SÀNG LỌC CHUYÊN KHOA")
 # ═══════════════════════════════════════════════════════════
 def _build_prompt(user_query: str, history: str, context: str) -> str:
     history_trimmed = history[-500:] if len(history) > 500 else history
-    return f"""Bạn là "Người Bạn Bác Sĩ" - chuyên môn cao, nói chuyện ân cần (xưng mình/cậu).
+    return f"""Bạn là "Trợ lý ảo Sàng lọc Y tế" của một bệnh viện đa khoa lớn.
+Nhiệm vụ của bạn KHÔNG PHẢI là chẩn đoán bệnh hay kê đơn thuốc, mà là LẮNG NGHE triệu chứng, CUNG CẤP thông tin sơ bộ và HƯỚNG DẪN BỆNH NHÂN ĐẾN ĐÚNG CHUYÊN KHOA.
+Luôn xưng hô ân cần, lịch sự (xưng là "Trợ lý/Mình" và gọi người dùng là "Bạn/Anh/Chị").
 
-LỊCH SỬ GẦN: {history_trimmed}
-DỮ LIỆU Y KHOA: {context}
-CÂU HỎI: {user_query}
+LỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY:
+{history_trimmed}
 
-XÁC ĐỊNH Ý ĐỊNH:
-- Nếu chào hỏi/cảm ơn → Trả lời ngắn gọn, KHÔNG dùng ###
-- Nếu hỏi y tế → Dùng format bên dưới:
+DỮ LIỆU Y KHOA ĐÁNG TIN CẬY ĐƯỢC CUNG CẤP:
+{context}
 
-(Câu dẫn cảm thông)
-### 🔍 Phân tích:
-(Phân tích triệu chứng dựa trên dữ liệu y khoa)
-### 🩺 Cần hỏi thêm:
-(Câu hỏi bổ sung HOẶC "Đã đủ thông tin")
-### 💡 Có thể là:
-(Các giả thuyết bệnh, xếp theo khả năng)
-### 👉 Chuyên khoa nên khám:
-**[TÊN]** - (Lý do)
-### 📝 Lưu ý:
-- Chăm sóc: ... | Thuốc: ... | Cảnh báo: ...
+CÂU HỎI HIỆN TẠI CỦA NGƯỜI DÙNG:
+{user_query}
 
-(Lời chúc sức khỏe)"""
+HƯỚNG DẪN TRẢ LỜI:
+1. Nếu câu hỏi là lời chào/cảm ơn/hỏi thăm thông thường: Trả lời ngắn gọn, thân thiện, KHÔNG dùng format có dấu ###.
+2. Nếu câu hỏi về triệu chứng hoặc sức khỏe, BẮT BUỘC trả lời theo ĐÚNG format sau:
+
+(1-2 câu mở đầu thể hiện sự đồng cảm với tình trạng của người dùng)
+
+### 🔍 Phân tích sơ bộ:
+(Dựa VÀO DỮ LIỆU ĐƯỢC CUNG CẤP, tóm tắt lại các triệu chứng và giải thích ngắn gọn nguyên nhân thông thường có thể gây ra tình trạng này).
+
+### 🩺 Có thể bạn đang gặp phải:
+(Chỉ liệt kê các hội chứng/vấn đề khả dĩ nhất dựa trên dữ liệu. Dùng từ ngữ cẩn trọng như "Có khả năng", "Có thể là", tuyệt đối không khẳng định chắc chắn 100%).
+
+### 🚨 Dấu hiệu nguy hiểm cần lưu ý (Red flags):
+(Nếu có các triệu chứng đi kèm nào cần cấp cứu ngay, hãy liệt kê ra. Nếu không, có thể bỏ qua phần này).
+
+### 👉 Chuyên khoa đề xuất thăm khám:
+**[TÊN CHUYÊN KHOA]** (Ví dụ: Khoa Tiêu hóa, Khoa Hô hấp, Khoa Thần kinh...)
+- **Lý do:** (Giải thích ngắn gọn tại sao triệu chứng này lại cần bác sĩ chuyên khoa đó khám).
+- **Lời khuyên trước khi đi khám:** (Ví dụ: Nhịn ăn sáng nếu cần xét nghiệm máu, mang theo sổ khám bệnh cũ...).
+
+(Kết thúc bằng một lời khuyên chân thành: Nhấn mạnh rằng đây chỉ là tư vấn tham khảo, người dùng cần đến gặp bác sĩ trực tiếp để được thăm khám chính xác nhất)."""
 
 
 # ═══════════════════════════════════════════════════════════
-# STREAM VỚI RETRY + THROTTLE
+# STREAM VỚI RETRY + THROTTLE (👇 ĐÃ CẬP NHẬT GỌI GROQ)
 # ═══════════════════════════════════════════════════════════
 def get_rag_context_sync(user_query: str, history_str: str) -> Tuple[str, str]:
     return _get_rag_context(user_query)
@@ -307,12 +298,21 @@ def stream_from_built_prompt(built_prompt: str, citation_text: str) -> Generator
 
     for attempt in range(MAX_RETRIES):
         try:
-            response_stream = llm.generate_content(built_prompt, stream=True)
+            # 👇 Gọi API Chat của Groq (Llama 3) thay vì genai.generate_content
+            response_stream = llm.chat.completions.create(
+                model=config.CHAT_MODEL,
+                messages=[{"role": "user", "content": built_prompt}],
+                temperature=0.2,
+                max_tokens=1024,
+                stream=True
+            )
+            
             full_response   = ""
             for chunk in response_stream:
-                if chunk.text:
-                    full_response += chunk.text
-                    yield chunk.text
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    full_response += delta
+                    yield delta
 
             if citation_text and "###" in full_response:
                 yield citation_text
@@ -359,8 +359,15 @@ def get_bot_response(user_query: str, history: str) -> str:
 
     for attempt in range(MAX_RETRIES):
         try:
-            response  = llm.generate_content(prompt)
-            final_ans = response.text
+            # 👇 Gọi API Đồng bộ của Groq
+            response = llm.chat.completions.create(
+                model=config.CHAT_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=1024
+            )
+            final_ans = response.choices[0].message.content
+            
             if citation_text and "###" in final_ans:
                 return final_ans + citation_text
             return final_ans

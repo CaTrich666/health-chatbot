@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- 1. CẤU HÌNH API KEY ---
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # --- 2. CẤU HÌNH ĐƯỜNG DẪN ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -24,9 +24,9 @@ PATH_SYMPTOM = os.path.join(RAW_DATA_DIR, "train.jsonl")
 
 # --- 4. CẤU HÌNH MODEL ---
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHAT_MODEL = "gemini-2.0-flash-lite"
+CHAT_MODEL = "llama-3.3-70b-versatile" 
 
-# --- 5. CẤU HÌNH BM25 + RRF (MỚI) ---
+# --- 5. CẤU HÌNH BM25 + RRF ---
 BM25_K1 = 1.5        # độ nhạy với tần suất từ (cao hơn = ưu tiên từ xuất hiện nhiều)
 BM25_B  = 0.75       # chuẩn hóa độ dài văn bản (0=không chuẩn hóa, 1=chuẩn hóa hoàn toàn)
 RRF_K   = 60         # hằng số RRF, càng nhỏ càng ưu tiên top rank

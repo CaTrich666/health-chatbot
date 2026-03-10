@@ -4,13 +4,12 @@ python-dotenv
 langchain
 langchain-community
 langchain-core
-langchain-google-genai
 langchain-huggingface
 chromadb
-google-generativeai
 sentence-transformers
 pysqlite3-binary
 bcrypt
 supabase
 rank_bm25
 underthesea
+groq
