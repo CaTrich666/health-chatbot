@@ -353,6 +353,11 @@ def render_sidebar():
 
         else:
             st.markdown('<div class="guest-mode-marker"></div>', unsafe_allow_html=True)
+
+            if st.button("✦ Chat mới", key="guest_new_chat", use_container_width=True, type="primary"):
+                st.session_state.guest_messages = []
+                st.rerun()
+
             st.info("🙂 Đang dùng chế độ Khách\n\nĐăng nhập để lưu lịch sử.")
             st.divider()
 
