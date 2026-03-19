@@ -27,30 +27,31 @@ Hệ thống được thiết kế theo kiến trúc RAG, xây dựng dựa trê
 HEALTH_CHATBOT/
 │
 ├── .streamlit/
-│   └── secrets.toml          # Cấu hình bảo mật (API Key cho Cloud)
+│   └── secrets.toml          # Cấu hình bảo mật (Chứa API Key khi deploy lên Cloud)
 │
-├── app/                      # GIAO DIỆN
+├── app/                      # TẦNG GIAO DIỆN (PRESENTATION TIER)
 │   ├── __init__.py
-│   └── web_chat.py           # File Giao diện Chat
+│   └── web_chat.py           # File Giao diện Chat (Streamlit UI)
 │
-├── data/                     # DỮ LIỆU 
-│   ├── chroma_db_diagnosis/  # Vector DB (Bộ nhớ AI - Kiến thức Y khoa)
-│   ├── raw/                  # Dữ liệu thô (csv, jsonl)
-│   └── chat_history.db       # SQLite: Lưu lịch sử chat & User
+├── data/                     # TẦNG DỮ LIỆU (DATA TIER)
+│   ├── chroma_db_diagnosis/  # Vector DB (Bộ nhớ ngữ nghĩa - Dense Retrieval)
+│   ├── bm25_index.pkl        # BM25 Index (Bộ nhớ từ khóa y khoa - Sparse Retrieval)
+│   ├── raw/                  # Dữ liệu thô gốc (csv, jsonl)
+│   └── chat_history.db       # Cơ sở dữ liệu SQLite: Lưu lịch sử chat đa phiên & Auth User
 │
-├── scripts/                  # CÔNG CỤ QUẢN TRỊ
-│   ├── build_db.py           # Tool nạp dữ liệu vào Vector DB
-│   └── check_models.py       # Tool kiểm tra trạng thái API Key
+├── scripts/                  # CÔNG CỤ QUẢN TRỊ & TIỀN XỬ LÝ
+│   ├── build_db.py           # Script cào, làm sạch và nạp dữ liệu vào ChromaDB & BM25
+│   └── check_models.py       # Script kiểm tra trạng thái và kết nối API Key
 │
-├── src/                      # LOGIC XỬ LÝ
+├── src/                      # TẦNG LOGIC XỬ LÝ (APPLICATION TIER)
 │   ├── services/
 │   │   ├── __init__.py
-│   │   └── ai_service.py     # Xử lý AI
-│   ├── utils/                # Các tiện ích mở rộng
+│   │   └── ai_service.py     # Lõi RAG: Xử lý Prompt Orchestrator, Stream Interceptor & RRF
+│   ├── utils/                # Các tiện ích mở rộng hệ thống
 │   ├── __init__.py
-│   ├── config.py             # File cấu hình hệ thống (Model Name, Paths)
-│   └── database.py           # Logic quản lý User, Đăng ký, Đăng nhập
+│   ├── config.py             # File cấu hình biến hệ thống (Model Name, System Paths, Params)
+│   └── database.py           # Logic ORM quản lý User, Xác thực và truy xuất phiên chat
 │
-├── .env                      # Biến môi trường (API Key Local)
-├── requirements.txt          # Danh sách thư viện cần cài đặt
-└── setup_database.py         # Script khởi tạo Database User ban đầu
+├── .env                      # File ẩn chứa biến môi trường (GROQ_API_KEY chạy tại Local)
+├── requirements.txt          # Danh sách thư viện dependencies (Dùng để build trên Cloud)
+└── setup_database.py         # Script khởi tạo Schema bảng cho Database SQLite ban đầu
