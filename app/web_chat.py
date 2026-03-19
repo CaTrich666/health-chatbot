@@ -28,9 +28,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-if "GOOGLE_API_KEY" in st.secrets:
-    os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
-    config.GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+
 
 # =========================================================
 # 🧠 KHỞI TẠO STATE
@@ -461,7 +459,7 @@ def render_chat():
             # Xoá bubble loading, thay bằng stream text
             response_placeholder.empty()
 
-            # BƯỚC 2: Stream từ Gemini (chữ hiện dần ngay từ token đầu tiên)
+            # BƯỚC 2: Stream từ Groq (chữ hiện dần ngay từ token đầu tiên)
             full_response = st.write_stream(
                 ai_service.stream_from_built_prompt(built_prompt, citation_text)
             )

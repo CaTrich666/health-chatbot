@@ -1,4 +1,5 @@
 import os
+import re
 import zipfile
 import time
 import pickle
@@ -6,14 +7,12 @@ import streamlit as st
 from typing import Generator, Optional, Tuple, List
 from collections import defaultdict
 
-# 👇 [CẬP NHẬT] Import Groq thay vì genai
 from groq import Groq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from src import config
 
 # ── Tokenizer tiếng Việt ──────────────────────────────────
-# Dùng underthesea nếu có, fallback về split() nếu chưa cài
 try:
     from underthesea import word_tokenize as vi_tokenize
     def _tokenize(text: str) -> list:
@@ -44,21 +43,21 @@ def _extract_db_if_needed():
 
 
 # ═══════════════════════════════════════════════════════════
-# THROTTLE - TRÁNH GỌI QUÁ NHANH (Giữ nguyên cho an toàn)
+# THROTTLE
 # ═══════════════════════════════════════════════════════════
-_last_gemini_call: float = 0.0
+_last_api_call: float = 0.0
 _MIN_INTERVAL_SEC: float = 2.0
 
-def _throttle_gemini():
-    global _last_gemini_call
-    elapsed = time.time() - _last_gemini_call
+def _throttle_api():
+    global _last_api_call
+    elapsed = time.time() - _last_api_call
     if elapsed < _MIN_INTERVAL_SEC:
         time.sleep(_MIN_INTERVAL_SEC - elapsed)
-    _last_gemini_call = time.time()
+    _last_api_call = time.time()
 
 
 # ═══════════════════════════════════════════════════════════
-# CACHE TÀI NGUYÊN - CHỈ CHẠY 1 LẦN DUY NHẤT
+# CACHE TÀI NGUYÊN
 # ═══════════════════════════════════════════════════════════
 @st.cache_resource(show_spinner=False)
 def load_resources() -> Tuple[Optional[object], Optional[object], Optional[object], Optional[list]]:
@@ -67,7 +66,6 @@ def load_resources() -> Tuple[Optional[object], Optional[object], Optional[objec
 
     _extract_db_if_needed()
 
-    # 👇 [CẬP NHẬT] Khởi tạo Groq LLM thay vì Gemini
     api_key = os.environ.get("GROQ_API_KEY") or getattr(config, "GROQ_API_KEY", None)
     if not api_key:
         print("❌ Lỗi: Không tìm thấy GROQ_API_KEY.")
@@ -80,7 +78,6 @@ def load_resources() -> Tuple[Optional[object], Optional[object], Optional[objec
     except Exception as e:
         print(f"❌ Lỗi khởi tạo Groq: {e}")
 
-    # Vector DB (Giữ nguyên)
     vector_db = None
     if os.path.exists(config.CHROMA_DB_DIR):
         try:
@@ -97,14 +94,13 @@ def load_resources() -> Tuple[Optional[object], Optional[object], Optional[objec
         except Exception as e:
             print(f"❌ Lỗi load ChromaDB: {e}")
 
-    # Load BM25 từ file .pkl (Giữ nguyên)
     bm25_index = None
     bm25_docs  = None
     if os.path.exists(config.BM25_INDEX_PATH):
         try:
             with open(config.BM25_INDEX_PATH, "rb") as f:
                 bm25_index, bm25_docs = pickle.load(f)
-            print(f"✅ Đã load BM25 index ({len(bm25_docs)} documents) từ {config.BM25_INDEX_PATH}")
+            print(f"✅ Đã load BM25 index ({len(bm25_docs)} documents)")
         except Exception as e:
             print(f"❌ Lỗi load BM25: {e}")
     else:
@@ -116,28 +112,23 @@ def load_resources() -> Tuple[Optional[object], Optional[object], Optional[objec
 
 
 # ═══════════════════════════════════════════════════════════
-# BM25 SEARCH - load từ .pkl, tokenize bằng underthesea
+# BM25 SEARCH
 # ═══════════════════════════════════════════════════════════
 def _bm25_search(query: str, k: int = None) -> List[Tuple[str, str, float]]:
     if k is None:
         k = config.TOP_K_RETRIEVAL
-
     _, _, bm25_index, bm25_docs = load_resources()
     if bm25_index is None or not bm25_docs:
         return []
-
     try:
         tokenized_query = _tokenize(query)
         scores      = bm25_index.get_scores(tokenized_query)
         top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
         return [
-            (
-                bm25_docs[i].page_content,
-                bm25_docs[i].metadata.get("source", "Tài liệu y khoa"),
-                float(scores[i]),
-            )
-            for i in top_indices
-            if scores[i] > 0
+            (bm25_docs[i].page_content,
+             bm25_docs[i].metadata.get("source", "Tài liệu y khoa"),
+             float(scores[i]))
+            for i in top_indices if scores[i] > 0
         ]
     except Exception as e:
         print(f"❌ Lỗi BM25 search: {e}")
@@ -150,23 +141,19 @@ def _bm25_search(query: str, k: int = None) -> List[Tuple[str, str, float]]:
 def _rrf_fusion(
     vector_results: List[Tuple[str, str]],
     bm25_results:   List[Tuple[str, str, float]],
-    k:              int = None,
+    k: int = None,
 ) -> List[Tuple[str, str]]:
     if k is None:
         k = config.TOP_K_FINAL
-
     rrf_k       = config.RRF_K
     scores      = defaultdict(float)
     content_map : dict = {}
-
     for rank, (content, source) in enumerate(vector_results, start=1):
         scores[content]     += 1.0 / (rrf_k + rank)
         content_map[content] = source
-
     for rank, (content, source, _) in enumerate(bm25_results, start=1):
         scores[content]     += 1.0 / (rrf_k + rank)
         content_map[content] = source
-
     top_docs = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:k]
     return [(content, content_map[content]) for content, _ in top_docs]
 
@@ -177,11 +164,9 @@ def _rrf_fusion(
 def _cached_similarity_search(query: str, k: int = None) -> tuple:
     if k is None:
         k = config.TOP_K_RETRIEVAL
-
     cache_key = f"vsearch_{query}_{k}"
     if cache_key in st.session_state:
         return st.session_state[cache_key]
-
     vector_db = load_resources()[0]
     if vector_db is None:
         return ()
@@ -199,7 +184,7 @@ def _cached_similarity_search(query: str, k: int = None) -> tuple:
 
 
 # ═══════════════════════════════════════════════════════════
-# RAG CONTEXT - Vector + BM25 + RRF
+# RAG CONTEXT
 # ═══════════════════════════════════════════════════════════
 def _get_rag_context(user_query: str) -> Tuple[str, str]:
     vector_results = list(_cached_similarity_search(user_query, k=config.TOP_K_RETRIEVAL))
@@ -212,20 +197,20 @@ def _get_rag_context(user_query: str) -> Tuple[str, str]:
         fused_results = vector_results[:config.TOP_K_FINAL]
         _, _, bm25_index, _ = load_resources()
         if bm25_index is None:
-            print("⚠️ BM25 index chưa được load, dùng vector search thuần")
+            print("⚠️ BM25 index chưa load, dùng vector search thuần")
 
     if not fused_results:
         return "Không có dữ liệu cụ thể, dùng kiến thức y khoa tổng quát.", ""
 
-    context_parts     = []
-    sources           = []
-    total_len         = 0
-    MAX_CONTEXT_CHARS = 1500
+    context_parts = []
+    sources       = []
+    total_len     = 0
+    MAX_CHARS     = 1500
 
     for content, source in fused_results:
-        if total_len >= MAX_CONTEXT_CHARS:
+        if total_len >= MAX_CHARS:
             break
-        snippet = content[:MAX_CONTEXT_CHARS - total_len]
+        snippet = content[:MAX_CHARS - total_len]
         context_parts.append(snippet)
         total_len += len(snippet)
         if source not in sources:
@@ -236,26 +221,84 @@ def _get_rag_context(user_query: str) -> Tuple[str, str]:
     return context, citation_text
 
 
+# ═══════════════════════════════════════════════════════════
+# CẮT LỊCH SỬ AN TOÀN
+# ═══════════════════════════════════════════════════════════
 def _trim_history_safe(history: str, max_chars: int = 1500) -> str:
-    """Cắt lịch sử an toàn theo số ký tự, không làm rách câu"""
     if len(history) <= max_chars:
         return history
     truncated = history[-max_chars:]
-
     idx = -1
     for marker in ["User:", "user:", "Người dùng:", "\nassistant:", "\nBot:", "Trợ lý:"]:
         idx = truncated.find(marker)
         if idx != -1:
             break
-
     if idx == -1:
         idx = truncated.find('\n')
-
     return "[...] " + truncated[idx:] if idx != -1 else "[...] " + truncated
 
 
 # ═══════════════════════════════════════════════════════════
-# BUILD PROMPT
+# LỌC HIDDEN CoT - Xóa nội dung trong thẻ <thinking>
+# Đây là bước hậu xử lý ở backend, người dùng không thấy
+# phần suy luận nội bộ, chỉ thấy câu trả lời sạch
+# ═══════════════════════════════════════════════════════════
+def _strip_thinking(text: str) -> str:
+    """Xóa toàn bộ nội dung trong thẻ <thinking>...</thinking>"""
+    cleaned = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
+    return cleaned.strip()
+
+
+def _stream_strip_thinking(stream_generator) -> Generator[str, None, None]:
+    """
+    Lọc thẻ <thinking> trong luồng stream theo thời gian thực.
+    Buffer tích lũy chunks cho đến khi thẻ đóng </thinking> xuất hiện
+    thì bỏ toàn bộ, sau đó yield bình thường.
+    """
+    buffer        = ""
+    inside_think  = False
+
+    for chunk in stream_generator:
+        buffer += chunk
+
+        # Vòng lặp xử lý buffer cho đến khi không còn thẻ nào cần xử lý
+        while True:
+            if not inside_think:
+                # Tìm thẻ mở
+                start = buffer.find("<thinking>")
+                if start == -1:
+                    # Không có thẻ mở → yield toàn bộ buffer trừ 9 ký tự cuối
+                    # (phòng trường hợp "<thinking" bị cắt giữa chunk)
+                    safe_len = max(0, len(buffer) - 9)
+                    if safe_len > 0:
+                        yield buffer[:safe_len]
+                        buffer = buffer[safe_len:]
+                    break
+                else:
+                    # Yield phần trước thẻ mở, bắt đầu buffer từ thẻ mở
+                    yield buffer[:start]
+                    buffer       = buffer[start:]
+                    inside_think = True
+            else:
+                # Đang trong thẻ thinking, tìm thẻ đóng
+                end = buffer.find("</thinking>")
+                if end == -1:
+                    # Chưa thấy thẻ đóng → giữ buffer, chờ chunk tiếp theo
+                    break
+                else:
+                    # Bỏ toàn bộ từ <thinking> đến </thinking>
+                    buffer       = buffer[end + len("</thinking>"):]
+                    inside_think = False
+
+    # Yield phần còn lại sau khi stream kết thúc
+    if buffer and not inside_think:
+        yield buffer
+
+
+# ═══════════════════════════════════════════════════════════
+# BUILD PROMPT - HIDDEN CoT với XML Tag <thinking>
+# Model suy luận trong <thinking>...</thinking>
+# Backend lọc bỏ trước khi hiển thị ra UI
 # ═══════════════════════════════════════════════════════════
 def _build_prompt(user_query: str, history: str, context: str) -> str:
     history_trimmed = _trim_history_safe(history)
@@ -267,82 +310,89 @@ TUYỆT ĐỐI KHÔNG chẩn đoán xác định bệnh hay kê đơn thuốc. X
 LỊCH SỬ TRÒ CHUYỆN:
 {history_trimmed}
 
-DỮ LIỆU Y KHOA RAG (Nguồn tham khảo chính):
+DỮ LIỆU Y KHOA RAG (Chỉ dùng SAU KHI đã đủ thông tin từ người dùng):
 {context}
-LƯU Ý NGÔN NGỮ: Dữ liệu RAG có thể ở dạng tiếng Anh. Hãy tự dịch và diễn giải
-sang tiếng Việt tự nhiên, giữ nguyên thuật ngữ y khoa quan trọng và ghi chú tên
-gốc trong ngoặc đơn nếu cần. Nếu RAG trống hoặc không liên quan, chỉ dùng kiến
-thức y khoa phổ thông đã kiểm chứng, KHÔNG suy diễn hay bịa đặt.
+LƯU Ý: RAG có thể ở dạng tiếng Anh, hãy dịch tự nhiên sang tiếng Việt.
+⛔ RAG TUYỆT ĐỐI KHÔNG được dùng để bù đắp thông tin còn thiếu từ người dùng.
+Dù RAG có đầy đủ dữ liệu, nếu người dùng chỉ gõ "tôi bị đau đầu" thì vẫn PHẢI vào HƯỚNG 2.
 
 CÂU HỎI CỦA NGƯỜI DÙNG:
 {user_query}
 
-QUY TRÌNH XỬ LÝ VÀ ĐÁNH GIÁ LOGIC (Đọc kỹ nhưng KHÔNG in phần này ra màn hình):
+════════════════════════════════════════════════════════════
+HƯỚNG DẪN ĐỊNH DẠNG ĐẦU RA (QUAN TRỌNG):
+Bắt buộc bắt đầu câu trả lời bằng thẻ <thinking> để suy luận nội bộ,
+SAU ĐÓ mới viết câu trả lời cho người dùng bên ngoài thẻ.
+Người dùng SẼ KHÔNG thấy nội dung trong thẻ <thinking>.
 
-BƯỚC 0 - TỔNG HỢP ĐA LƯỢT:
-Gộp toàn bộ thông tin từ LỊCH SỬ + CÂU HỎI HIỆN TẠI thành 1 bức tranh hoàn chỉnh.
+Ví dụ cấu trúc output:
+<thinking>
+[Toàn bộ suy luận nội bộ ở đây - người dùng không thấy]
+</thinking>
+[Câu trả lời thực sự cho người dùng ở đây]
+════════════════════════════════════════════════════════════
 
-BƯỚC 1 - BỘ LỌC 3 YẾU TỐ & NGOẠI LỆ CẤP CỨU:
-Đếm xem bệnh nhân đã cung cấp đủ các yếu tố sau chưa:
-(1) Triệu chứng cụ thể (đau ở đâu, như thế nào)
-(2) Thời gian / Tần suất (bao lâu, liên tục hay từng cơn)
-(3) Dấu hiệu đi kèm / Đặc điểm (sốt, buồn nôn, tuổi...)
-⚠️ LUẬT PHÁ VÒNG LẶP: Nếu người dùng đã trả lời "Không biết", "Không nhớ", "Không có", hãy xem như yếu tố đó ĐÃ ĐƯỢC ĐÁP ỨNG và ngưng hỏi lại yếu tố đó.
+BƯỚC 1 - SUY LUẬN NỘI BỘ (viết trong thẻ <thinking>, không hiện ra UI):
+<thinking>
+TỔNG HỢP ĐA LƯỢT: Gộp thông tin từ LỊCH SỬ + CÂU HỎI HIỆN TẠI.
 
-🚨 NGOẠI LỆ CẤP CỨU (GHI ĐÈ MỌI BỘ LỌC):
-Nếu phát hiện BẤT KỲ từ khóa nào thuộc nhóm Cấp cứu:
-(khó thở đột ngột, đau ngực dữ dội, co giật, yếu liệt nửa người, xuất huyết ồ ạt...)
-→ BỎ QUA việc đếm yếu tố, CHUYỂN NGAY SANG HƯỚNG 3 với cảnh báo 🔴 KHẨN CẤP.
+BẢNG KIỂM TRA YẾU TỐ (chỉ đếm thông tin do NGƯỜI DÙNG cung cấp, KHÔNG đếm RAG):
+• Yếu tố 1 - Triệu chứng cụ thể : CÓ/KHÔNG → [ghi rõ]
+• Yếu tố 2 - Thời gian/Tần suất  : CÓ/KHÔNG → [ghi rõ]
+• Yếu tố 3 - Dấu hiệu kèm/Đặc điểm: CÓ/KHÔNG → [ghi rõ]
+• Dấu hiệu cấp cứu               : CÓ/KHÔNG → [ghi rõ]
+• Tổng yếu tố: X/3
+• Quyết định: HƯỚNG [0/1/2/3]
+</thinking>
 
-BƯỚC 2 - THANG ĐO MỨC ĐỘ KHẨN CẤP:
-🔴 KHẨN CẤP (Cấp cứu ngay): như Ngoại lệ đã nêu ở trên.
-🟡 CẦN KHÁM SỚM (24-48h): triệu chứng kéo dài, ảnh hưởng sinh hoạt, không thuyên giảm.
-🟢 THEO DÕI TẠI NHÀ: triệu chứng nhẹ, thoáng qua, thể trạng tốt.
+LUẬT PHÁ VÒNG LẶP: Nếu người dùng trả lời "không biết/không nhớ/không có"
+→ Tính yếu tố đó là ĐÃ ĐÁP ỨNG, không hỏi lại.
 
-BƯỚC 3 - KIỂM TRA TRƯỚC KHI IN (Self-check):
-- Có dùng từ khẳng định 100% không? (Nếu có → đổi thành "có thể").
-- Có đề xuất tên thuốc cụ thể không? (Nếu có → xóa đi).
+NGOẠI LỆ CẤP CỨU (ghi đè mọi thứ): Nếu có từ khóa nguy hiểm
+(khó thở đột ngột, đau ngực dữ dội, co giật, yếu liệt nửa người, xuất huyết ồ ạt)
+→ Bỏ qua đếm yếu tố, vào HƯỚNG 3 với 🔴 KHẨN CẤP ngay.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-QUYẾT ĐỊNH HƯỚNG PHẢN HỒI (Chọn 1 trong 4):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BƯỚC 2 - CÂU TRẢ LỜI THỰC SỰ (viết bên ngoài thẻ <thinking>, người dùng sẽ thấy):
 
 ▶ HƯỚNG 0: NGOÀI PHẠM VI Y TẾ
-- Trả lời lịch sự: "Mình chỉ có thể hỗ trợ các vấn đề về sức khỏe và y tế. Bạn có triệu chứng hay thắc mắc sức khỏe nào cần tư vấn không?" (KHÔNG dùng ###).
+"Mình chỉ hỗ trợ các vấn đề sức khỏe và y tế. Bạn có triệu chứng nào cần tư vấn không?"
+(KHÔNG dùng ###)
 
-▶ HƯỚNG 1: CHỈ LÀ CHÀO HỎI / CẢM ƠN
-- Trả lời ngắn gọn, thân thiện (KHÔNG dùng ###).
+▶ HƯỚNG 1: CHÀO HỎI / CẢM ƠN
+Trả lời ngắn gọn thân thiện (KHÔNG dùng ###).
 
-▶ HƯỚNG 2: THIẾU THÔNG TIN (Tổng hợp đa lượt < 2 yếu tố VÀ KHÔNG có dấu hiệu Cấp cứu)
-- KHÔNG hướng dẫn chuyên khoa. Dữ liệu RAG KHÔNG được dùng để bù đắp thông tin còn thiếu.
-- Hỏi ĐÚNG 1 yếu tố còn thiếu theo thứ tự ưu tiên:
-  + Nếu THIẾU (2) → "Triệu chứng này bắt đầu từ bao giờ? Đau liên tục hay từng cơn?"
-  + Nếu THIẾU (3) → "Ngoài ra có kèm sốt, buồn nôn hay triệu chứng nào khác không?"
-  + Nếu THIẾU CẢ HAI → Chỉ hỏi (2). KHÔNG hỏi quá 1 câu mỗi lượt.
+▶ HƯỚNG 2: THIẾU THÔNG TIN (Tổng < 2 VÀ không có dấu hiệu cấp cứu)
+- KHÔNG đưa ra lời khuyên chuyên khoa.
+- 1 câu đồng cảm + hỏi ĐÚNG 1 yếu tố còn thiếu:
+  + Thiếu yếu tố 2 → "Triệu chứng này bắt đầu từ bao giờ? Liên tục hay từng cơn?"
+  + Thiếu yếu tố 3 → "Ngoài ra có kèm sốt, buồn nôn hay dấu hiệu nào khác không?"
+  + Thiếu cả 2 và 3 → chỉ hỏi yếu tố 2. Lượt sau mới hỏi yếu tố 3.
+- KHÔNG hỏi quá 1 câu mỗi lượt.
 
-▶ HƯỚNG 3: ĐẠT NGƯỠNG SÀNG LỌC (Đủ >= 2 yếu tố HOẶC thuộc Ngoại lệ Cấp cứu)
-- BẮT BUỘC xuất ra CHÍNH XÁC theo biểu mẫu dưới đây.
-- ⚠️ QUAN TRỌNG: TUYỆT ĐỐI KHÔNG in các dấu ngoặc vuông [...] hoặc ngoặc đơn (...) vào câu trả lời cuối cùng. Hãy thay thế chúng bằng nội dung thực tế.
+▶ HƯỚNG 3: ĐẠT NGƯỠNG (Tổng >= 2 HOẶC có dấu hiệu cấp cứu)
+⚠️ KHÔNG in ngoặc vuông [ ] hay ngoặc đơn ( ).
 
-Viết 1-2 câu đồng cảm và trấn an tự nhiên ở đây.
+Viết 1-2 câu đồng cảm và trấn an tự nhiên.
 
 ### 🔍 Phân tích sơ bộ:
-Tóm tắt triệu chứng và nguyên nhân thông thường dựa trên DỮ LIỆU RAG. Dùng từ ngữ cẩn trọng: "Có khả năng", "Có thể là".
+Tóm tắt triệu chứng và nguyên nhân dựa trên DỮ LIỆU RAG. Dùng: "Có khả năng", "Có thể là".
 
 ### 🚨 Mức độ & Cảnh báo:
-CHỈ IN 1 DÒNG DUY NHẤT chứa Icon màu sắc, tên mức độ và lý do ngắn gọn.
+Chỉ 1 dòng: icon màu + tên mức độ + lý do ngắn.
+(🔴 Cấp cứu ngay / 🟡 Khám trong 24-48h / 🟢 Theo dõi tại nhà)
 
 ### 👉 Chuyên khoa đề xuất:
-**TÊN CHUYÊN KHOA ƯU TIÊN 1**
+**Tên chuyên khoa ưu tiên 1**
 - **Lý do:** Giải thích ngắn gọn.
 - **Lưu ý:** Nhịn ăn sáng / Mang hồ sơ cũ / Cần người nhà đi cùng...
 
-TÊN CHUYÊN KHOA 2 (Chỉ ghi nếu triệu chứng thực sự phức tạp, nếu không thì bỏ qua hoàn toàn phần này)
+Tên chuyên khoa 2 nếu thực sự cần, nếu không thì bỏ qua.
 
-⚠️ *Lưu ý: Đây chỉ là thông tin hỗ trợ sàng lọc ban đầu, vui lòng đến cơ sở y tế để được Bác sĩ chẩn đoán chính xác nhất.*"""
+⚠️ *Đây chỉ là thông tin hỗ trợ sàng lọc ban đầu, vui lòng đến cơ sở y tế để được Bác sĩ chẩn đoán chính xác nhất.*"""
+
 
 # ═══════════════════════════════════════════════════════════
-# STREAM VỚI RETRY + THROTTLE (👇 ĐÃ CẬP NHẬT GỌI GROQ)
+# STREAM VỚI RETRY + HIDDEN CoT FILTER
 # ═══════════════════════════════════════════════════════════
 def get_rag_context_sync(user_query: str, history_str: str) -> Tuple[str, str]:
     return _get_rag_context(user_query)
@@ -350,33 +400,36 @@ def get_rag_context_sync(user_query: str, history_str: str) -> Tuple[str, str]:
 
 def stream_from_built_prompt(built_prompt: str, citation_text: str) -> Generator[str, None, None]:
     _, llm, _, _ = load_resources()
-
     if not llm:
         yield "⚠️ Hệ thống đang bảo trì. Vui lòng thử lại sau."
         return
 
-    _throttle_gemini()
-
+    _throttle_api()
     MAX_RETRIES  = 3
     RETRY_DELAYS = [5, 15, 30]
 
     for attempt in range(MAX_RETRIES):
         try:
-            # 👇 Gọi API Chat của Groq (Llama 3) thay vì genai.generate_content
-            response_stream = llm.chat.completions.create(
+            raw_stream = llm.chat.completions.create(
                 model=config.CHAT_MODEL,
                 messages=[{"role": "user", "content": built_prompt}],
                 temperature=0.2,
                 max_tokens=1024,
                 stream=True
             )
-            
-            full_response   = ""
-            for chunk in response_stream:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    full_response += delta
-                    yield delta
+
+            # Tạo generator trả về raw chunks
+            def _raw_chunks():
+                for chunk in raw_stream:
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        yield delta
+
+            # Lọc <thinking> trước khi yield ra UI
+            full_response = ""
+            for visible_chunk in _stream_strip_thinking(_raw_chunks()):
+                full_response += visible_chunk
+                yield visible_chunk
 
             if citation_text and "###" in full_response:
                 yield citation_text
@@ -389,8 +442,8 @@ def stream_from_built_prompt(built_prompt: str, citation_text: str) -> Generator
                     wait = RETRY_DELAYS[attempt]
                     yield f"\n\n⏳ *AI đang bận, tự động thử lại sau {wait} giây...*\n\n"
                     time.sleep(wait)
-                    global _last_gemini_call
-                    _last_gemini_call = time.time()
+                    global _last_api_call
+                    _last_api_call = time.time()
                 else:
                     yield "\n\n⚠️ AI quá tải, vui lòng gửi lại tin nhắn sau 1 phút."
             else:
@@ -415,23 +468,22 @@ def get_bot_response(user_query: str, history: str) -> str:
 
     context, citation_text = _get_rag_context(user_query)
     prompt = _build_prompt(user_query, history, context)
-
-    _throttle_gemini()
+    _throttle_api()
 
     MAX_RETRIES  = 3
     RETRY_DELAYS = [5, 15, 30]
 
     for attempt in range(MAX_RETRIES):
         try:
-            # 👇 Gọi API Đồng bộ của Groq
-            response = llm.chat.completions.create(
+            response  = llm.chat.completions.create(
                 model=config.CHAT_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 max_tokens=1024
             )
-            final_ans = response.choices[0].message.content
-            
+            raw_text  = response.choices[0].message.content
+            # Lọc <thinking> trong chế độ non-stream
+            final_ans = _strip_thinking(raw_text)
             if citation_text and "###" in final_ans:
                 return final_ans + citation_text
             return final_ans
@@ -446,6 +498,6 @@ def get_bot_response(user_query: str, history: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════
-# PRELOAD KHI KHỞI ĐỘNG
+# PRELOAD
 # ═══════════════════════════════════════════════════════════
 load_resources()
