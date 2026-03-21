@@ -1,6 +1,10 @@
 # 🏥 Health Chatbot AI
 
-link trang web: https://health-chatbot-tranhuutai.streamlit.app/
+**Link truy cập:** [https://health-chatbot-tranhuutai.streamlit.app/](https://health-chatbot-tranhuutai.streamlit.app/)
+
+**Tên dự án:** Trợ lý ảo (Health Chatbot) sàng lọc triệu chứng.
+
+**Mục tiêu  của dự án:** Một chatbot hỏi người dùng về các triệu chứng hiện tại và đưa ra gợi ý họ nên đi khám ở chuyên khoa nào.
 
 Dự án Chatbot tư vấn sức khỏe thông minh sử dụng kiến trúc **Hybrid RAG**.
 
