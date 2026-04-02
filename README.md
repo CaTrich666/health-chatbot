@@ -26,27 +26,27 @@ Hệ thống được thiết kế theo kiến trúc RAG, xây dựng dựa trê
    * **Advanced Prompt Engineering:** Áp dụng kỹ thuật phân luồng đa kịch bản (Adaptive Routing) và tự kiểm duyệt ngầm (Self-Consistency) theo hướng **Sàng lọc chuyên khoa**. Ép buộc AI đánh giá dựa trên ngưỡng thông tin nghiêm ngặt và nhận diện dấu hiệu cấp cứu (Red Flags). Hệ thống **tuyệt đối không tự ý chẩn đoán hay kê đơn thuốc**, chỉ tập trung phân tích triệu chứng để điều hướng người bệnh đến đúng chuyên khoa một cách an toàn nhất.
 
 
-### Chương 1: Tổng Quan Đề Tài
+### Chương 1: GIỚI THIỆU
 * **Vấn đề:** Giải quyết tình trạng LLM thông thường dễ mắc lỗi "ảo giác" (tự bịa dữ liệu) khi tư vấn sức khỏe.
 * **Mục tiêu:** Xây dựng hệ thống sàng lọc triệu chứng, phân loại mức độ khẩn cấp và điều hướng chuyên khoa với độ tin cậy y khoa cao.
 
-### Chương 2: Cơ Sở Lý Thuyết & Kiến Trúc Hybrid RAG
+### Chương 2: CƠ SỞ LÝ THUYẾT VÀ CÔNG NGHỆ ÁP DỤNG
 * **Giải pháp cốt lõi:** Ứng dụng mô hình **Hybrid Search** để khai thác tri thức từ bộ y văn MedQuad.
     * **Vector Search (ChromaDB):** Thấu hiểu ngữ nghĩa câu hỏi qua ngôn ngữ tự nhiên.
     * **Keyword Search (BM25):** Truy xuất chính xác tuyệt đối các danh từ y khoa đặc thù.
 * **Thuật toán RRF:** Dung hợp và xếp hạng kết quả từ hai luồng truy xuất, đảm bảo ngữ cảnh (Context) nạp vào AI là tối ưu nhất.
 > ![Sơ đồ Hybrid RAG](UML/Hybrid_RAG.drawio.png)
 
-### Chương 3: Phân Tích & Thiết Kế Hệ Thống
+### Chương 3: PHÂN TÍCH VÀ THIẾT KẾ HỆ THỐNG
 * **Kiến trúc 3 tầng (3-Tier):** Tách biệt Presentation (Streamlit), Application (Python Logic) và Data Tier (ChromaDB, BM25, SQLite).
 * **Prompt Orchestrator:** Thiết kế hệ thống câu lệnh 5 lớp, đóng vai trò "màng lọc an toàn" để kiểm soát tư duy của AI và kích hoạt cơ chế **Red Flag Override** (Báo động đỏ) khi phát hiện dấu hiệu cấp cứu.
 > ![Kiến trúc hệ thống](UML/Kien_Truc_Tong_The.drawio.png)
 
-### Chương 4: Hiện Thực Hóa & Thử Nghiệm
+### Chương 4: TRIỂN KHAI VÀ THỬ NGHIỆM HỆ THỐNG
 * **Hiệu suất:** Tích hợp **Llama 3.3 70B** thông qua hạ tầng **Groq LPU**, cho tốc độ phản hồi gần như tức thì (TTFT < 0.5s).
 * **Kiểm thử:** Hệ thống vượt qua các kịch bản kiểm thử lâm sàng: từ chối trả lời ngoài phạm vi, chủ động đặt câu hỏi xác định triệu chứng và điều hướng đúng chuyên khoa.
 
-### Chương 5: Kết Luận & Hướng Phát Triển
+### Chương 5: KẾT LUẬN VÀ HƯỚNG PHÁT TRIỂN
 * **Đánh giá:** Hệ thống đạt yêu cầu về tính kỷ luật, an toàn và tốc độ trong môi trường hỗ trợ y tế sơ bộ.
 * **Mở rộng:** Hướng tới kiến trúc **GraphRAG** (Knowledge Graph) để xử lý các ca bệnh phức tạp và tăng cường khả năng giải thích (Explainable AI).
    
