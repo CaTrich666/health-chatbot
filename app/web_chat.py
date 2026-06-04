@@ -1,3 +1,8 @@
+"""
+web_chat.py
+"""
+
+
 try:
     __import__('pysqlite3')
     import sys
@@ -22,8 +27,8 @@ load_dotenv()
 # ⚙️ CẤU HÌNH TRANG
 # =========================================================
 st.set_page_config(
-    page_title="Health AI",
-    page_icon="🏥",
+    page_title="Solar AI",
+    page_icon="☀️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -287,8 +292,8 @@ def render_sidebar():
     with st.sidebar:
         st.markdown("""
         <div class="sidebar-logo">
-            <img src="https://cdn-icons-png.flaticon.com/512/3774/3774299.png" width="32">
-            Health AI
+            <span style="font-size: 24px;">☀️</span>
+            Solar AI
         </div>
         """, unsafe_allow_html=True)
 
@@ -391,10 +396,14 @@ def render_sidebar():
 # 💬 RENDER KHU VỰC CHAT CHÍNH
 # =========================================================
 def render_chat():
-    st.title("Health AI ✦")
-    st.warning("**Lưu ý:** Tư vấn sơ bộ từ AI, không thay thế chẩn đoán của bác sĩ.", icon="⚠️")
+    st.title("Solar AI ✦")
+    st.info(
+        "**Lưu ý:** Thông tin tư vấn chỉ mang tính tham khảo ban đầu. "
+        "Để có phương án lắp đặt, công suất và chi phí chính xác, cần khảo sát thực tế bởi nhân viên kỹ thuật.",
+        icon="☀️"
+    )
 
-    AVATAR_AI   = "https://cdn-icons-png.flaticon.com/512/3774/3774299.png"
+    AVATAR_AI   = "☀️"
     AVATAR_USER = "https://cdn-icons-png.flaticon.com/512/1144/1144760.png"
 
     # Load tin nhắn
@@ -409,13 +418,13 @@ def render_chat():
     if not messages:
         st.markdown("""
         <div class="welcome-card">
-            <h3>Xin chào! Tôi có thể giúp gì cho sức khỏe của bạn?</h3>
-            <p>Mô tả triệu chứng, đặt câu hỏi hoặc tìm hiểu về y tế.</p>
+            <h3>Xin chào! Tôi có thể tư vấn gì về điện mặt trời?</h3>
+            <p>Hãy hỏi về hệ thống áp mái, hòa lưới, hybrid, pin lưu trữ hoặc quy trình lắp đặt.</p>
             <div class="chips-row">
-                <span class="chip">🤒 Bị sốt cao</span>
-                <span class="chip">💊 Thuốc hạ sốt</span>
-                <span class="chip">🫁 Ho kéo dài</span>
-                <span class="chip">😴 Mất ngủ</span>
+                <span class="chip">☀️ Điện mặt trời áp mái là gì?</span>
+                <span class="chip">🔋 Có cần pin lưu trữ không?</span>
+                <span class="chip">⚡ Hệ hòa lưới là gì?</span>
+                <span class="chip">🏠 Nhà em phù hợp lắp không?</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -428,7 +437,7 @@ def render_chat():
             st.write(msg["content"])
 
     # ─── Xử lý input ───
-    if prompt := st.chat_input("Hỏi về sức khỏe của bạn..."):
+    if prompt := st.chat_input("Hỏi về điện mặt trời..."):
 
         # Hiển thị tin nhắn người dùng ngay lập tức
         with st.chat_message("user", avatar=AVATAR_USER):
@@ -450,7 +459,7 @@ def render_chat():
             response_placeholder.markdown("""
             <div class="thinking-bubble">
                 <div class="thinking-spinner"></div>
-                <span>Đang tra cứu tài liệu y khoa…</span>
+                <span>Đang tra cứu tài liệu điện mặt trời…</span>
                 <span class="dots">
                     <span></span><span></span><span></span>
                 </span>

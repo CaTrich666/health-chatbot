@@ -58,40 +58,42 @@ def save_batch_to_chroma(documents, embeddings):
 # 3. LOGIC CHÍNH
 # ==========================================
 def main():
-    print("🚀 BẮT ĐẦU QUY TRÌNH NẠP DỮ LIỆU HYBRID (VECTOR + BM25)...")
+    print("🚀 BẮT ĐẦU QUY TRÌNH NẠP DỮ LIỆU HYBRID ĐIỆN MẶT TRỜI (VECTOR + BM25)...")
 
     embeddings    = get_embedding_model()
     all_documents = []
 
     print(f"\n1️⃣  Đang đọc dữ liệu từ: {config.RAW_DATA_DIR}")
 
-    if os.path.exists(config.PATH_MEDQUAD):
-        print(f"   - Đang đọc MedQuad.csv...")
+    if os.path.exists(config.PATH_SOLAR_FAQ):
+        print(f"   - Đang đọc solar_faq.csv...")
         try:
-            df_med = pd.read_csv(config.PATH_MEDQUAD).dropna(subset=['question', 'answer'])
-            for _, row in df_med.iterrows():
-                text = f"Hỏi: {row['question']}\nĐáp: {row['answer']}"
-                all_documents.append(Document(page_content=text, metadata={"source": "medquad"}))
-            print(f"     -> Lấy được {len(df_med)} dòng.")
+            df_faq = pd.read_csv(config.PATH_SOLAR_FAQ).dropna(subset=['question', 'answer'])
+            for _, row in df_faq.iterrows():
+                category = row['category'] if 'category' in df_faq.columns and pd.notna(row.get('category')) else "solar_faq"
+                text = f"Câu hỏi: {row['question']}\nTrả lời: {row['answer']}"
+                all_documents.append(Document(page_content=text, metadata={"source": category}))
+            print(f"     -> Lấy được {len(df_faq)} dòng.")
         except Exception as e:
-            print(f"     ❌ Lỗi đọc MedQuad: {e}")
+            print(f"     ❌ Lỗi đọc solar_faq.csv: {e}")
 
-    if os.path.exists(config.PATH_SYMPTOM):
-        print(f"   - Đang đọc train.jsonl...")
+    if os.path.exists(config.PATH_SOLAR_DOCS):
+        print(f"   - Đang đọc solar_docs.csv...")
         try:
-            df_sym = pd.read_json(config.PATH_SYMPTOM, lines=True).dropna(subset=['input_text', 'output_text'])
-            for _, row in df_sym.iterrows():
-                text = f"Triệu chứng: {row['input_text']}\nBệnh: {row['output_text']}"
-                all_documents.append(Document(page_content=text, metadata={"source": "symptom"}))
-            print(f"     -> Lấy được {len(df_sym)} dòng.")
+            df_docs = pd.read_csv(config.PATH_SOLAR_DOCS).dropna(subset=['title', 'content'])
+            for _, row in df_docs.iterrows():
+                source = row['source'] if 'source' in df_docs.columns and pd.notna(row.get('source')) else "solar_docs"
+                text = f"Tiêu đề: {row['title']}\nNội dung: {row['content']}"
+                all_documents.append(Document(page_content=text, metadata={"source": source}))
+            print(f"     -> Lấy được {len(df_docs)} dòng.")
         except Exception as e:
-            print(f"     ❌ Lỗi đọc Jsonl: {e}")
+            print(f"     ❌ Lỗi đọc solar_docs.csv: {e}")
 
     total_docs = len(all_documents)
-    print(f"👉 TỔNG CỘNG: {total_docs} tài liệu cần xử lý.")
+    print(f"👉 TỔNG CỘNG: {total_docs} tài liệu điện mặt trời cần xử lý.")
 
     if total_docs == 0:
-        print("❌ Không có dữ liệu nào để nạp.")
+        print("❌ Không có dữ liệu điện mặt trời nào để nạp.")
         return
 
     # ── BƯỚC 1: Tạo BM25 index ──────────────────────────
@@ -118,7 +120,7 @@ def main():
         print(f"   ⏳ Đang xử lý đợt {current_batch_num}/{total_batches} ({len(batch)} dòng)...", end='\r')
         save_batch_to_chroma(batch, embeddings)
 
-    print(f"\n\n🎉 XONG TOÀN BỘ! Vector DB + BM25 ({config.BM25_INDEX_PATH}) đã sẵn sàng.")
+    print(f"\n\n🎉 XONG TOÀN BỘ! Vector DB + BM25 điện mặt trời ({config.BM25_INDEX_PATH}) đã sẵn sàng.")
 
 
 if __name__ == "__main__":

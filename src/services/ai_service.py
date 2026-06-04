@@ -1,3 +1,504 @@
+"""
+ai_service.py
+"""
+
+
+try:
+    __import__('pysqlite3')
+    import sys
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except ImportError:
+    pass
+
+import streamlit as st
+import streamlit.components.v1 as components
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dotenv import load_dotenv
+from src import config, database
+from src.services import ai_service
+
+load_dotenv()
+
+# =========================================================
+# ⚙️ CẤU HÌNH TRANG
+# =========================================================
+st.set_page_config(
+    page_title="Solar AI",
+    page_icon="☀️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+
+
+# =========================================================
+# 🧠 KHỞI TẠO STATE
+# =========================================================
+def init_session_state():
+    if "user_info" not in st.session_state:
+        st.session_state.user_info = None
+    if "current_conv_id" not in st.session_state:
+        st.session_state.current_conv_id = None
+    if "guest_messages" not in st.session_state:
+        st.session_state.guest_messages = []
+    if "delete_confirm_id" not in st.session_state:
+        st.session_state.delete_confirm_id = None
+
+init_session_state()
+
+# =========================================================
+# 🛡️ CHỐNG DỊCH
+# =========================================================
+components.html("""
+<script>
+    function antiTranslate() {
+        const head = window.parent.document.head;
+        if (!head.querySelector('meta[name="google"][content="notranslate"]')) {
+            const m = window.parent.document.createElement('meta');
+            m.name = "google"; m.content = "notranslate";
+            head.appendChild(m);
+        }
+        window.parent.document.documentElement.setAttribute('translate', 'no');
+        window.parent.document.documentElement.classList.add('notranslate');
+    }
+    antiTranslate();
+</script>
+""", height=0)
+
+# =========================================================
+# 🎨 CSS
+# =========================================================
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=Google+Sans+Display:wght@400;500&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Google Sans', 'Segoe UI', sans-serif;
+        font-size: 14.5px;
+        color: #1f1f1f;
+    }
+
+    #MainMenu, footer, .stDeployButton, [data-testid="InputInstructions"] { display: none !important; }
+
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        border-bottom: none !important;
+        box-shadow: none !important;
+        height: 2.5rem !important;
+    }
+    [data-testid="collapsedControl"] {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        z-index: 999999 !important;
+        background-color: transparent !important;
+    }
+
+    .stApp { background-color: #f8f9fa; }
+
+    section[data-testid="stSidebar"] {
+        background-color: #f0f4f9 !important;
+        border-right: 1px solid #e3e8f0 !important;
+    }
+    [data-testid="stSidebarContent"] {
+        padding: 0 !important;
+        overflow: hidden !important;
+    }
+    [data-testid="stSidebarUserContent"] {
+        padding: 2.5rem 0 0 0 !important;
+        height: 100vh !important;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box !important;
+    }
+    [data-testid="stSidebarUserContent"] > div {
+        display: flex;
+        flex-direction: column;
+        height: 100% !important;
+        position: relative;
+    }
+
+    .sidebar-logo {
+        display: flex; align-items: center; gap: 8px;
+        padding: 0 10px 5px 10px;
+        font-family: 'Google Sans Display', sans-serif;
+        font-size: 17px; font-weight: 500; color: #1a73e8;
+    }
+    .sidebar-logo img { border-radius: 50%; width: 28px; }
+
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background-color: #e8f0fe !important;
+        color: #1a73e8 !important;
+        border: none !important;
+        border-radius: 24px !important;
+        font-weight: 500 !important;
+        padding: 0.4rem 1rem !important;
+        margin-top: 5px;
+    }
+
+    hr { margin: 0.8rem 0 !important; border-color: #dde3ec !important; }
+
+    [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"]:has(.history-marker) {
+        height: calc(100vh - 140px) !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 4px 0 0 !important;
+        margin-bottom: 0 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"]:has(.history-marker) > div {
+        height: 100% !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"]:has(.history-marker) .stButton > button {
+        background-color: transparent !important;
+        color: #3c4043 !important;
+        border: none !important;
+        text-align: left !important;
+        padding: 4px 8px !important;
+        justify-content: flex-start !important;
+    }
+
+    [data-testid="element-container"]:has(.logout-zone) {
+        position: absolute;
+        bottom: 0; left: 0; width: 100%;
+    }
+    .logout-zone {
+        padding: 10px 0 10px 0;
+        border-top: 1px solid #dde3ec;
+        background: #f0f4f9;
+    }
+
+    [data-testid="stSidebar"]:has(.guest-mode-marker) [data-testid="stSidebarUserContent"] > div {
+        overflow-y: auto !important;
+        padding-bottom: 2rem !important;
+    }
+    [data-testid="stSidebar"]:has(.guest-mode-marker) .stTextInput input {
+        padding: 0.4rem 0.8rem !important;
+        min-height: 38px !important;
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #c4cdd6; border-radius: 4px; }
+
+    .main .block-container {
+        padding-top: 3rem;
+        padding-bottom: 120px;
+        max-width: 800px;
+    }
+    [data-testid="stChatMessage"] { background: transparent !important; border: none !important; box-shadow: none !important; }
+    .stChatMessage:has([data-testid="chatAvatarIcon-user"]) .stMarkdown {
+        background-color: #e8f0fe !important;
+        border-radius: 18px 18px 4px 18px !important;
+        padding: 0.6rem 1rem !important;
+        display: inline-block !important;
+    }
+    [data-testid="chatAvatarIcon-user"] img, [data-testid="chatAvatarIcon-assistant"] img {
+        border-radius: 50% !important;
+        border: 1px solid #e8eaed !important;
+    }
+
+    .stBottom { background: linear-gradient(to top, #f8f9fa 80%, transparent) !important; padding-bottom: 25px !important; }
+    .stChatInput { max-width: 800px !important; margin: 0 auto !important; }
+    .stChatInput > div {
+        background: #ffffff !important;
+        border: 1px solid #e3e8f0 !important;
+        border-radius: 28px !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05) !important;
+        padding: 5px 5px 5px 15px !important;
+    }
+    .stChatInput > div:focus-within { border-color: #1a73e8 !important; }
+    .stChatInput [data-baseweb], .stChatInput textarea {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    .stChatInput textarea { font-family: 'Google Sans', sans-serif !important; }
+    .stChatInput button {
+        background: #1a73e8 !important;
+        border-radius: 50% !important;
+        width: 42px !important;
+        height: 42px !important;
+        margin: 0 !important;
+    }
+
+    .welcome-card {
+        background: linear-gradient(135deg, #e8f0fe 0%, #eef6ff 100%);
+        border-radius: 20px; padding: 2.5rem 2rem; text-align: center;
+        border: 1px solid #d2e3fc; margin-bottom: 2rem;
+    }
+    .welcome-card h3 { color: #1a73e8; font-weight: 500; font-family: 'Google Sans Display', sans-serif; }
+    .chips-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 1rem; }
+    .chip { background: #fff; border: 1px solid #dadce0; border-radius: 20px; padding: 6px 14px; font-size: 13px; }
+
+    /* ══════════════════════════════════════
+       LOADING INDICATOR - HIỆU ỨNG ĐANG PHÂN TÍCH
+    ══════════════════════════════════════ */
+    .thinking-bubble {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        background: #ffffff;
+        border: 1px solid #e3e8f0;
+        border-radius: 18px 18px 18px 4px;
+        padding: 10px 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        font-size: 13.5px;
+        color: #5f6368;
+        margin-top: 2px;
+    }
+    /* Vòng xoay CSS thuần */
+    .thinking-spinner {
+        width: 16px;
+        height: 16px;
+        border: 2.5px solid #e3e8f0;
+        border-top-color: #1a73e8;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        flex-shrink: 0;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    /* Ba chấm nhảy */
+    .dots span {
+        display: inline-block;
+        width: 5px; height: 5px;
+        margin: 0 2px;
+        background: #1a73e8;
+        border-radius: 50%;
+        animation: bounce 1.2s infinite ease-in-out;
+    }
+    .dots span:nth-child(1) { animation-delay: 0s; }
+    .dots span:nth-child(2) { animation-delay: 0.2s; }
+    .dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+        0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+        40%            { transform: translateY(-5px); opacity: 1; }
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
+# =========================================================
+# 🗂️ RENDER SIDEBAR LOGIC
+# =========================================================
+def render_sidebar():
+    with st.sidebar:
+        st.markdown("""
+        <div class="sidebar-logo">
+            <img src="https://cdn-icons-png.flaticon.com/512/869/869869.png" width="32">
+            Solar AI
+        </div>
+        """, unsafe_allow_html=True)
+
+        if st.session_state.user_info:
+            st.markdown('<div class="logged-in-state"></div>', unsafe_allow_html=True)
+            user = st.session_state.user_info
+
+            st.markdown(f"👋 Xin chào, **{user['full_name']}**")
+            if st.button("✦ Chat mới", use_container_width=True, type="primary"):
+                st.session_state.current_conv_id = None
+                st.rerun()
+
+            st.divider()
+            st.caption("📂 LỊCH SỬ GẦN ĐÂY")
+
+            with st.container(height=280):
+                st.markdown('<div class="history-marker"></div>', unsafe_allow_html=True)
+
+                convs = database.get_user_conversations(user['id'])
+                if not convs:
+                    st.caption("Chưa có lịch sử.")
+                else:
+                    for conv in convs:
+                        c1, c2 = st.columns([0.8, 0.2])
+                        with c1:
+                            if st.session_state.delete_confirm_id == conv['id']:
+                                st.error("Xóa?", icon="⚠️")
+                                d1, d2 = st.columns(2)
+                                if d1.button("Có", key=f"y_{conv['id']}", use_container_width=True):
+                                    database.delete_conversation(conv['id'])
+                                    st.session_state.delete_confirm_id = None
+                                    if st.session_state.current_conv_id == conv['id']:
+                                        st.session_state.current_conv_id = None
+                                    st.rerun()
+                                if d2.button("Ko", key=f"n_{conv['id']}", use_container_width=True):
+                                    st.session_state.delete_confirm_id = None
+                                    st.rerun()
+                            else:
+                                icon  = "📌 " if conv.get('is_pinned', 0) else "💬 "
+                                title = conv['title'][:20] + "..." if len(conv['title']) > 20 else conv['title']
+                                if st.button(f"{icon}{title}", key=f"btn_{conv['id']}", use_container_width=True):
+                                    st.session_state.current_conv_id = conv['id']
+                                    st.rerun()
+                        with c2:
+                            if st.session_state.delete_confirm_id != conv['id']:
+                                with st.popover("⋮"):
+                                    is_pinned = conv.get('is_pinned', 0)
+                                    if st.button("Bỏ ghim" if is_pinned else "📌 Ghim", key=f"pin_{conv['id']}", use_container_width=True):
+                                        database.toggle_pin_conversation(conv['id'], is_pinned)
+                                        st.rerun()
+                                    if st.button("🗑️ Xóa", key=f"del_{conv['id']}", use_container_width=True):
+                                        st.session_state.delete_confirm_id = conv['id']
+                                        st.rerun()
+
+            st.markdown('<div class="logout-zone">', unsafe_allow_html=True)
+            if st.button("🚪 Đăng Xuất", use_container_width=True):
+                st.session_state.user_info     = None
+                st.session_state.current_conv_id = None
+                st.session_state.guest_messages  = []
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        else:
+            st.markdown('<div class="guest-mode-marker"></div>', unsafe_allow_html=True)
+
+            if st.button("✦ Chat mới", key="guest_new_chat", use_container_width=True, type="primary"):
+                st.session_state.guest_messages = []
+                st.rerun()
+
+            st.info("🙂 Đang dùng chế độ Khách\n\nĐăng nhập để lưu lịch sử.")
+            st.divider()
+
+            mode = st.radio("Chế độ xác thực", ["Đăng Nhập", "Đăng Ký"], horizontal=True, label_visibility="collapsed")
+
+            if mode == "Đăng Nhập":
+                with st.form("login_form"):
+                    u = st.text_input("Tài khoản", placeholder="Nhập username...")
+                    p = st.text_input("Mật khẩu", type="password", placeholder="Nhập mật khẩu...")
+                    if st.form_submit_button("Đăng nhập", use_container_width=True):
+                        usr = database.login_user(u, p)
+                        if usr:
+                            st.session_state.user_info = usr
+                            st.rerun()
+                        else:
+                            st.error("Sai tên đăng nhập hoặc mật khẩu.")
+            else:
+                with st.form("reg_form"):
+                    nu = st.text_input("Tài khoản mới", placeholder="Chọn username...")
+                    np = st.text_input("Mật khẩu", type="password", placeholder="Tạo mật khẩu...")
+                    nn = st.text_input("Họ và tên", placeholder="Tên đầy đủ của bạn...")
+                    if st.form_submit_button("Tạo tài khoản", use_container_width=True):
+                        ok, msg = database.register_user(nu, np, nn)
+                        if ok:
+                            st.success("✅ Thành công! Hãy đăng nhập.")
+                        else:
+                            st.error(msg)
+
+
+# =========================================================
+# 💬 RENDER KHU VỰC CHAT CHÍNH
+# =========================================================
+def render_chat():
+    st.title("Solar AI ✦")
+    st.info("**Lưu ý:** Thông tin tư vấn chỉ mang tính tham khảo ban đầu. Để có phương án lắp đặt, công suất và chi phí chính xác, cần khảo sát thực tế bởi nhân viên kỹ thuật.", icon="☀️")
+
+    AVATAR_AI   = "https://cdn-icons-png.flaticon.com/512/869/869869.png"
+    AVATAR_USER = "https://cdn-icons-png.flaticon.com/512/1144/1144760.png"
+
+    # Load tin nhắn
+    messages = []
+    if st.session_state.user_info:
+        if st.session_state.current_conv_id:
+            messages = database.load_messages(st.session_state.current_conv_id)
+    else:
+        messages = st.session_state.guest_messages
+
+    # Box Welcome
+    if not messages:
+        st.markdown("""
+        <div class="welcome-card">
+            <h3>Xin chào! Tôi có thể tư vấn gì về điện mặt trời?</h3>
+            <p>Hãy hỏi về hệ thống áp mái, hòa lưới, hybrid, pin lưu trữ hoặc quy trình lắp đặt.</p>
+            <div class="chips-row">
+                <span class="chip">☀️ Điện mặt trời áp mái là gì?</span>
+                <span class="chip">🔋 Có cần pin lưu trữ không?</span>
+                <span class="chip">⚡ Hệ hòa lưới là gì?</span>
+                <span class="chip">🏠 Nhà em phù hợp lắp không?</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Hiển thị lịch sử chat
+    for msg in messages:
+        role   = msg["role"]
+        avatar = AVATAR_USER if role == "user" else AVATAR_AI
+        with st.chat_message(role, avatar=avatar):
+            st.write(msg["content"])
+
+    # ─── Xử lý input ───
+    if prompt := st.chat_input("Hỏi về điện mặt trời..."):
+
+        # Hiển thị tin nhắn người dùng ngay lập tức
+        with st.chat_message("user", avatar=AVATAR_USER):
+            st.write(prompt)
+
+        with st.chat_message("assistant", avatar=AVATAR_AI):
+            history_str = "\n".join([f"{m['role']}: {m['content']}" for m in messages[-4:]])
+
+            # ══════════════════════════════════════════════════════
+            # [FIX CHÍNH] BƯỚC 1: Hiện loading bubble TRƯỚC
+            # rồi chạy RAG (phần nặng nhất) bên trong spinner.
+            # Spinner kết thúc → chữ bắt đầu stream ngay lập tức.
+            # ══════════════════════════════════════════════════════
+
+            # Placeholder để thay loading → stream text
+            response_placeholder = st.empty()
+
+            # Hiện bubble "đang phân tích" ngay lập tức
+            response_placeholder.markdown("""
+            <div class="thinking-bubble">
+                <div class="thinking-spinner"></div>
+                <span>Đang tra cứu tài liệu điện mặt trời…</span>
+                <span class="dots">
+                    <span></span><span></span><span></span>
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Chạy RAG đồng bộ (bước chậm) - người dùng nhìn thấy bubble ở trên
+            context, citation_text = ai_service._get_rag_context(prompt)
+            built_prompt = ai_service._build_prompt(prompt, history_str, context)
+
+            # Xoá bubble loading, thay bằng stream text
+            response_placeholder.empty()
+
+            # BƯỚC 2: Stream từ Groq (chữ hiện dần ngay từ token đầu tiên)
+            full_response = st.write_stream(
+                ai_service.stream_from_built_prompt(built_prompt, citation_text)
+            )
+
+        # ── Lưu DB ──
+        if st.session_state.user_info:
+            uid = st.session_state.user_info['id']
+            if st.session_state.current_conv_id is None:
+                title  = prompt[:30] + '..' if len(prompt) > 30 else prompt
+                new_id = database.create_conversation(uid, title)
+                st.session_state.current_conv_id = new_id
+                database.save_message(new_id, "user",      prompt)
+                database.save_message(new_id, "assistant", full_response)
+                st.rerun()
+            else:
+                database.save_message(st.session_state.current_conv_id, "user",      prompt)
+                database.save_message(st.session_state.current_conv_id, "assistant", full_response)
+        else:
+            st.session_state.guest_messages.append({"role": "user",      "content": prompt})
+            st.session_state.guest_messages.append({"role": "assistant", "content": full_response})
+
+
+# =========================================================
+# 🚀 KHỞI CHẠY ỨNG DỤNG
+# =========================================================
+if __name__ == "__main__":
+    render_sidebar()
+    render_chat()
+
 import os
 import re
 import zipfile
@@ -62,7 +563,7 @@ def _throttle_api():
 @st.cache_resource(show_spinner=False)
 def load_resources() -> Tuple[Optional[object], Optional[object], Optional[object], Optional[list]]:
     t_start = time.perf_counter()
-    print("⏳ Đang khởi tạo tài nguyên AI (Chỉ chạy 1 lần)...")
+    print("⏳ Đang khởi tạo tài nguyên AI tư vấn điện mặt trời (Chỉ chạy 1 lần)...")
 
     _extract_db_if_needed()
 
@@ -126,7 +627,7 @@ def _bm25_search(query: str, k: int = None) -> List[Tuple[str, str, float]]:
         top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
         return [
             (bm25_docs[i].page_content,
-             bm25_docs[i].metadata.get("source", "Tài liệu y khoa"),
+             bm25_docs[i].metadata.get("source", "Tài liệu điện mặt trời"),
              float(scores[i]))
             for i in top_indices if scores[i] > 0
         ]
@@ -173,7 +674,7 @@ def _cached_similarity_search(query: str, k: int = None) -> tuple:
     try:
         docs   = vector_db.similarity_search(query, k=k)
         result = tuple(
-            (d.page_content, d.metadata.get("source", "Tài liệu y khoa"))
+            (d.page_content, d.metadata.get("source", "Tài liệu điện mặt trời"))
             for d in docs
         )
         st.session_state[cache_key] = result
@@ -200,7 +701,7 @@ def _get_rag_context(user_query: str) -> Tuple[str, str]:
             print("⚠️ BM25 index chưa load, dùng vector search thuần")
 
     if not fused_results:
-        return "Không có dữ liệu cụ thể, dùng kiến thức y khoa tổng quát.", ""
+        return "Không có dữ liệu cụ thể, dùng kiến thức tổng quát về điện năng lượng mặt trời.", ""
 
     context_parts = []
     sources       = []
@@ -291,20 +792,22 @@ def _stream_strip_thinking(stream_generator) -> Generator[str, None, None]:
 def _build_prompt(user_query: str, history: str, context: str) -> str:
     history_trimmed = _trim_history_safe(history)
  
-    return f"""Bạn là "Trợ lý ảo Sàng lọc Y tế" của một bệnh viện đa khoa uy tín.
-Nhiệm vụ: LẮNG NGHE, ĐÁNH GIÁ mức độ nghiêm trọng, CUNG CẤP thông tin sơ bộ và HƯỚNG DẪN đến đúng chuyên khoa.
-TUYỆT ĐỐI KHÔNG chẩn đoán xác định bệnh hay kê đơn thuốc. Xưng "Mình/Trợ lý" và gọi người dùng là "Bạn/Anh/Chị".
+    return f"""Bạn là "Trợ lý tư vấn điện mặt trời" hỗ trợ khách hàng tìm hiểu ban đầu về giải pháp điện năng lượng mặt trời.
+Nhiệm vụ: LẮNG NGHE, PHÂN TÍCH nhu cầu sử dụng điện, CUNG CẤP thông tin sơ bộ và HƯỚNG DẪN khách hàng đến giải pháp phù hợp.
+TUYỆT ĐỐI KHÔNG đưa ra báo giá chính thức, không cam kết công suất chính xác và không khẳng định phương án lắp đặt khi chưa khảo sát thực tế.
+Xưng "Mình/Trợ lý" và gọi người dùng là "Bạn/Anh/Chị".
  
 LỊCH SỬ TRÒ CHUYỆN:
 {history_trimmed}
  
-DỮ LIỆU Y KHOA RAG (Chỉ dùng SAU KHI đã đủ thông tin từ người dùng):
+DỮ LIỆU ĐIỆN MẶT TRỜI RAG:
 {context}
-LƯU Ý NGÔN NGỮ: Dữ liệu RAG có thể ở dạng tiếng Anh. Hãy tự dịch và diễn giải
-sang tiếng Việt tự nhiên, giữ nguyên thuật ngữ y khoa quan trọng và ghi chú tên
-gốc trong ngoặc đơn nếu cần. Nếu RAG trống hoặc không liên quan, chỉ dùng kiến
-thức y khoa phổ thông đã kiểm chứng, KHÔNG suy diễn hay bịa đặt.
+LƯU Ý NGÔN NGỮ: Dữ liệu RAG có thể ở dạng tiếng Anh hoặc tiếng Việt. Hãy tự dịch và diễn giải
+sang tiếng Việt tự nhiên, giữ nguyên thuật ngữ kỹ thuật quan trọng như inverter, hybrid, hòa lưới,
+pin lưu trữ, công suất kWp nếu cần. Nếu RAG trống hoặc không liên quan, chỉ dùng kiến thức
+tổng quát đã kiểm chứng về điện năng lượng mặt trời, KHÔNG suy diễn hay bịa đặt.
 ⛔ CẢNH BÁO: KHÔNG tạo ra URL, liên kết anchor hay bất kỳ định dạng nào hiển thị như đường link.
+⛔ KHÔNG tự bịa thông tin về công ty, sản phẩm, giá bán, chính sách bảo hành hoặc thông số kỹ thuật nếu dữ liệu không có.
  
 CÂU HỎI CỦA NGƯỜI DÙNG:
 {user_query}
@@ -327,81 +830,84 @@ BƯỚC 1 - SUY LUẬN NỘI BỘ (viết trong thẻ <thinking>, KHÔNG hiện 
 TỔNG HỢP ĐA LƯỢT: Gộp toàn bộ thông tin từ LỊCH SỬ + CÂU HỎI HIỆN TẠI.
  
 BẢNG KIỂM TRA YẾU TỐ (chỉ đếm thông tin NGƯỜI DÙNG cung cấp, KHÔNG đếm RAG):
-• Yếu tố 1 - Triệu chứng cụ thể : CÓ/KHÔNG → ghi rõ nếu có
-• Yếu tố 2 - Thời gian/Tần suất  : CÓ/KHÔNG → ghi rõ nếu có
-• Yếu tố 3 - Dấu hiệu kèm/Đặc điểm: CÓ/KHÔNG → ghi rõ nếu có
-• Dấu hiệu cấp cứu (Red Flag)    : CÓ/KHÔNG → ghi rõ nếu có
+• Yếu tố 1 - Nhu cầu/câu hỏi cụ thể về điện mặt trời : CÓ/KHÔNG → ghi rõ nếu có
+• Yếu tố 2 - Thông tin sử dụng điện hoặc mục tiêu lắp đặt: CÓ/KHÔNG → ghi rõ nếu có
+• Yếu tố 3 - Điều kiện lắp đặt như mái, khu vực, diện tích, lưu trữ: CÓ/KHÔNG → ghi rõ nếu có
+• Cảnh báo kỹ thuật/an toàn điện: CÓ/KHÔNG → ghi rõ nếu có
 • Tổng yếu tố: X/3
 • Quyết định: HƯỚNG số mấy và lý do
 </thinking>
  
-LUẬT PHÁ VÒNG LẶP: Nếu người dùng trả lời "không biết/không nhớ/không có"
-→ Tính yếu tố đó là ĐÃ ĐÁP ỨNG, không hỏi lại.
+LUẬT PHÁ VÒNG LẶP: Nếu người dùng trả lời "không biết/không rõ/chưa có thông tin"
+→ Tính yếu tố đó là ĐÃ ĐÁP ỨNG, không hỏi lại liên tục.
  
-🚨 NGOẠI LỆ CẤP CỨU (Ghi đè mọi thứ - ưu tiên tuyệt đối):
-Nếu phát hiện từ khóa nguy hiểm tính mạng:
-(khó thở cấp, đau ngực dữ dội lan ra tay/vai, co giật, yếu liệt nửa người,
-xuất huyết ồ ạt, mất ý thức, tím tái...)
+🚨 NGOẠI LỆ AN TOÀN KỸ THUẬT (Ghi đè mọi thứ - ưu tiên tuyệt đối):
+Nếu phát hiện nội dung nguy hiểm như:
+(chập điện, cháy nổ, có mùi khét, inverter báo lỗi nghiêm trọng, dây điện nóng bất thường,
+điện giật, tự ý đấu nối điện, tấm pin nứt vỡ, hệ thống phát tia lửa, ngập nước khu vực điện...)
 → BỎ QUA đếm yếu tố, CHUYỂN NGAY SANG HƯỚNG 4.
  
 ════════════════════════════════════════════════════════════
 BƯỚC 2 - CHỌN VÀ THỰC HIỆN ĐÚNG 1 TRONG 4 HƯỚNG SAU:
 ════════════════════════════════════════════════════════════
  
-▶ HƯỚNG 0: NGOÀI PHẠM VI Y TẾ
-Câu hỏi không liên quan sức khỏe/y tế.
-Trả lời: "Mình chỉ có thể hỗ trợ các vấn đề về sức khỏe và y tế.
-Bạn có triệu chứng hay thắc mắc sức khỏe nào cần tư vấn không?"
+▶ HƯỚNG 0: NGOÀI PHẠM VI ĐIỆN MẶT TRỜI
+Câu hỏi không liên quan đến điện năng lượng mặt trời, hệ thống điện mặt trời, thiết bị, lắp đặt, bảo trì hoặc tư vấn sử dụng điện.
+Trả lời: "Mình chỉ có thể hỗ trợ các vấn đề liên quan đến điện năng lượng mặt trời.
+Bạn có thắc mắc về hệ thống áp mái, hòa lưới, hybrid, pin lưu trữ hoặc quy trình lắp đặt không?"
 (KHÔNG dùng ### hoặc liên kết)
  
 ▶ HƯỚNG 1: CHÀO HỎI / CẢM ƠN
-Không có triệu chứng bệnh.
-Trả lời ngắn gọn, thân thiện (KHÔNG dùng ### hoặc liên kết).
+Không có nhu cầu tư vấn cụ thể.
+Trả lời ngắn gọn, thân thiện, gợi ý người dùng có thể hỏi về điện mặt trời áp mái, pin lưu trữ, chi phí tham khảo, quy trình lắp đặt hoặc bảo trì.
+(KHÔNG dùng ### hoặc liên kết)
  
-▶ HƯỚNG 2: THIẾU THÔNG TIN (Tổng < 2 yếu tố VÀ không có Red Flag)
-- KHÔNG đưa ra lời khuyên chuyên khoa dù RAG có đầy đủ dữ liệu.
-- Viết 1 câu đồng cảm + hỏi ĐÚNG 1 yếu tố còn thiếu:
-  + Thiếu yếu tố 2 → "Triệu chứng này của bạn đã kéo dài bao lâu rồi ạ? Liên tục hay từng cơn?"
-  + Thiếu yếu tố 3 → "Ngoài ra bạn có kèm sốt, buồn nôn hay dấu hiệu nào khác không?"
+▶ HƯỚNG 2: THIẾU THÔNG TIN (Tổng < 2 yếu tố VÀ không có cảnh báo kỹ thuật)
+- KHÔNG đưa ra phương án lắp đặt cụ thể khi chưa đủ thông tin.
+- Viết 1 câu thân thiện + hỏi ĐÚNG 1 yếu tố còn thiếu quan trọng nhất:
+  + Thiếu yếu tố 2 → "Bạn cho mình biết tiền điện trung bình mỗi tháng khoảng bao nhiêu hoặc mục tiêu lắp đặt là tiết kiệm điện, dự phòng khi mất điện hay dùng cho kinh doanh ạ?"
+  + Thiếu yếu tố 3 → "Bạn có thể cho mình biết loại mái, diện tích mái dự kiến hoặc khu vực lắp đặt không ạ?"
   + Thiếu cả 2 và 3 → chỉ hỏi yếu tố 2. Lượt sau mới hỏi yếu tố 3.
-- KHÔNG hỏi quá 1 câu mỗi lượt.
+- KHÔNG hỏi quá 1 câu dài mỗi lượt.
  
-▶ HƯỚNG 3: ĐẠT NGƯỠNG SÀNG LỌC (Tổng >= 2 yếu tố, KHÔNG có Red Flag)
-⚠️ LỆNH BẮT BUỘC: In ra CHÍNH XÁC 3 tiêu đề ### bên dưới.
+▶ HƯỚNG 3: ĐẠT NGƯỠNG TƯ VẤN SƠ BỘ (Tổng >= 2 yếu tố, KHÔNG có cảnh báo kỹ thuật)
+⚠️ LỆNH BẮT BUỘC: In ra CHÍNH XÁC 4 tiêu đề ### bên dưới.
 ⚠️ TUYỆT ĐỐI KHÔNG in ngoặc vuông hay ngoặc đơn vào câu trả lời.
-⚠️ KHÔNG gộp phần Phân tích sơ bộ vào câu đồng cảm mở đầu.
+⚠️ KHÔNG gộp phần Phân tích nhu cầu vào câu mở đầu.
  
-Viết 1-2 câu đồng cảm và trấn an tự nhiên tại đây.
+Viết 1-2 câu mở đầu thân thiện, nhấn mạnh đây là tư vấn sơ bộ và cần khảo sát thực tế để chính xác.
  
-### 🔍 Phân tích sơ bộ:
-Tóm tắt triệu chứng và nguyên nhân thông thường dựa trên DỮ LIỆU RAG.
-Dùng từ ngữ cẩn trọng: "Có khả năng", "Có thể là".
+### 🔍 Phân tích nhu cầu:
+Tóm tắt nhu cầu của người dùng dựa trên thông tin họ đã cung cấp.
+Dùng từ ngữ cẩn trọng: "Có thể phù hợp", "Nên xem xét", "Cần khảo sát thêm".
  
-### 🚨 Mức độ & Cảnh báo:
-Chỉ 1 dòng duy nhất: icon màu + tên mức độ + lý do ngắn từ triệu chứng thực tế.
-(🟡 Cần khám trong 24-48h / 🟢 Có thể theo dõi tại nhà)
+### ⚡ Giải pháp gợi ý:
+Đề xuất hướng phù hợp như điện mặt trời hòa lưới, hybrid hoặc có pin lưu trữ.
+Giải thích ngắn gọn vì sao giải pháp đó phù hợp với nhu cầu.
  
-### 👉 Chuyên khoa đề xuất:
-**Tên chuyên khoa ưu tiên 1**
-- **Lý do:** Giải thích ngắn gọn tại sao.
-- **Lưu ý:** Nhịn ăn sáng / Mang hồ sơ cũ / Cần người nhà đi cùng...
+### 🛠️ Lưu ý kỹ thuật:
+Nêu các yếu tố cần khảo sát như diện tích mái, hướng nắng, bóng che, kết cấu mái, tải điện,
+vị trí lắp đặt inverter, hệ thống điện hiện hữu và nhu cầu dùng điện ban ngày/ban đêm.
  
-Tên chuyên khoa 2 nếu triệu chứng thực sự phức tạp, nếu không thì bỏ qua hoàn toàn.
+### 👉 Bước tiếp theo:
+Khuyến nghị người dùng liên hệ nhân viên kỹ thuật để khảo sát thực tế, đo đạc mái,
+kiểm tra hệ thống điện và tư vấn công suất, chi phí, thiết bị phù hợp.
  
-⚠️ *Đây chỉ là thông tin hỗ trợ sàng lọc ban đầu, vui lòng đến cơ sở y tế để được Bác sĩ chẩn đoán chính xác nhất.*
+⚠️ *Đây chỉ là thông tin tư vấn ban đầu, không thay thế khảo sát và thiết kế kỹ thuật thực tế.*
  
-▶ HƯỚNG 4: TÌNH HUỐNG CẤP CỨU - RED FLAG (Có dấu hiệu nguy hiểm tính mạng)
-⚠️ LỆNH SINH TỬ: TUYỆT ĐỐI KHÔNG dùng biểu mẫu của HƯỚNG 3.
-⚠️ KHÔNG in ngoặc vuông. Thay thế bằng nội dung triệu chứng thực tế của người dùng.
-Phải dùng CHÍNH XÁC định dạng báo động dưới đây:
+▶ HƯỚNG 4: TÌNH HUỐNG CẢNH BÁO AN TOÀN ĐIỆN
+⚠️ LỆNH AN TOÀN: TUYỆT ĐỐI KHÔNG dùng biểu mẫu của HƯỚNG 3.
+⚠️ KHÔNG in ngoặc vuông. Thay thế bằng nội dung nguy hiểm thực tế của người dùng.
+Phải dùng CHÍNH XÁC định dạng cảnh báo dưới đây:
  
-### 🚨 CẢNH BÁO KHẨN CẤP: NGUY HIỂM TÍNH MẠNG
-**Hệ thống nhận diện bạn đang có dấu hiệu cấp cứu: nêu ngắn gọn triệu chứng nguy hiểm cụ thể của người dùng tại đây.**
+### 🚨 CẢNH BÁO AN TOÀN ĐIỆN: CẦN XỬ LÝ NGAY
+**Hệ thống nhận diện bạn đang mô tả dấu hiệu rủi ro kỹ thuật: nêu ngắn gọn dấu hiệu nguy hiểm cụ thể của người dùng tại đây.**
  
-- 🚑 **HÀNH ĐỘNG NGAY:** Vui lòng ngừng nhắn tin. Gọi ngay cấp cứu **115** hoặc nhờ người thân đưa đến Khoa Cấp cứu của Bệnh viện gần nhất ngay lập tức!
-- ⏳ **Trong lúc chờ:** Tuyệt đối không tự ý dùng thuốc hay tự lái xe. Hãy ngồi hoặc nằm nghỉ ở tư thế thoải mái nhất.
+- ⚡ **HÀNH ĐỘNG NGAY:** Vui lòng ngừng tự thao tác với hệ thống điện. Ngắt nguồn nếu có thể thực hiện an toàn và liên hệ kỹ thuật viên có chuyên môn để kiểm tra.
+- 🛑 **Không nên làm:** Không tự ý đấu nối, tháo inverter, chạm vào dây dẫn, tủ điện hoặc khu vực có dấu hiệu chập cháy, mùi khét, tia lửa hay ngập nước.
+- 📞 **Khuyến nghị:** Liên hệ đơn vị lắp đặt hoặc nhân viên kỹ thuật điện mặt trời để được kiểm tra trực tiếp.
  
-⚠️ *(Hệ thống AI tạm ngưng tư vấn chuyên sâu để ưu tiên an toàn tính mạng cho bạn)*"""
+⚠️ *(Hệ thống AI tạm ngưng tư vấn chi tiết để ưu tiên an toàn điện và an toàn con người)*"""
  
 
 # ═══════════════════════════════════════════════════════════

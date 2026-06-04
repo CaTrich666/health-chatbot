@@ -6,7 +6,7 @@ sys.path.append(os.getcwd())
 
 from src import database
 
-print("🛠️  BẮT ĐẦU QUÁ TRÌNH CÀI ĐẶT DATABASE...")
+print("🛠️  BẮT ĐẦU QUÁ TRÌNH CÀI ĐẶT DATABASE CHO SOLAR AI...")
 
 # 1. Đường dẫn file DB
 db_path = os.path.join("data", "chat_history.db")
@@ -22,7 +22,7 @@ else:
     print("ℹ️  Chưa có file Database cũ.")
 
 # 3. Ép chạy lệnh tạo bảng
-print("🔄 Đang khởi tạo các bảng dữ liệu (Users, Conversations, Messages)...")
+print("🔄 Đang khởi tạo các bảng dữ liệu cho chatbot tư vấn điện mặt trời (Users, Conversations, Messages)...")
 try:
     database.init_db()
     print("✅ Đã chạy lệnh init_db() thành công.")
@@ -41,7 +41,7 @@ try:
     print(f"📊 Danh sách các bảng hiện có trong DB: {table_names}")
     
     if 'users' in table_names and 'conversations' in table_names:
-        print("\n🎉 CÀI ĐẶT THÀNH CÔNG! BẠN CÓ THỂ CHẠY WEB ĐƯỢC RỒI.")
+        print("\n🎉 CÀI ĐẶT THÀNH CÔNG! BẠN CÓ THỂ CHẠY WEB SOLAR AI ĐƯỢC RỒI.")
     else:
         print("\n⚠️ Cảnh báo: Vẫn thiếu bảng dữ liệu.")
         

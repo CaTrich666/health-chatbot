@@ -13,14 +13,14 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
 
 # Tên thư mục chứa Database
-CHROMA_DB_DIR = os.path.join(DATA_DIR, "chroma_db_diagnosis")
+CHROMA_DB_DIR = os.path.join(DATA_DIR, "chroma_db_solar")
 
 # Tên thư mục chứa file BM25:
-BM25_INDEX_PATH = os.path.join(DATA_DIR, "bm25_index.pkl")
+BM25_INDEX_PATH = os.path.join(DATA_DIR, "bm25_solar_index.pkl")
 
 # --- 3. ĐƯỜNG DẪN FILE DỮ LIỆU ---
-PATH_MEDQUAD = os.path.join(RAW_DATA_DIR, "medquad.csv")
-PATH_SYMPTOM = os.path.join(RAW_DATA_DIR, "train.jsonl")
+PATH_SOLAR_FAQ = os.path.join(RAW_DATA_DIR, "solar_faq.csv")
+PATH_SOLAR_DOCS = os.path.join(RAW_DATA_DIR, "solar_docs.csv")
 
 # --- 4. CẤU HÌNH MODEL ---
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
